@@ -1,8 +1,7 @@
 package main
 
 import (
-	"fmt"
-	"os"
+	"github.com/emancipat3r/vps3/utils"
 )
 
 func check(e error) {
@@ -11,12 +10,7 @@ func check(e error) {
 	}
 }
 
-func makeTempDir() {
-	tmpdir, err := os.MkdirTemp("", "tmp.*")
-	check(err)
-	fmt.Println("Temp dir created -", tmpdir)
-}
-
 func main() {
-	makeTempDir()
+	utils.MakeTempDir()
+
 }
