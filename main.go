@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/charmbracelet/lipgloss"
 	"github.com/emancipat3r/vps3/utils"
 )
 
@@ -12,5 +13,4 @@ func check(e error) {
 
 func main() {
 	utils.MakeTempDir()
-
 }
