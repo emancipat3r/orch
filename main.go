@@ -1,16 +1,26 @@
 package main
 
 import (
-	"github.com/charmbracelet/lipgloss"
+	"fmt"
+
 	"github.com/emancipat3r/vps3/utils"
 )
 
-func check(e error) {
-	if e != nil {
-		panic(e)
-	}
-}
-
 func main() {
-	utils.MakeTempDir()
+	/*
+		utils.Info("My Logger")
+		utils.Debug("Debug")
+		utils.Error("Error")
+		utils.Warn("Warn")
+	*/
+
+	path := utils.Prompt("What is your path? > ")
+
+	fmt.Println(path)
+
+	if utils.DirExists(path) {
+		fmt.Println("Directory exists")
+	} else {
+		fmt.Println("Directory doesn't exist")
+	}
 }

@@ -1,28 +1,39 @@
 package utils
 
 import (
-        "fmt"
-        tea "github.com/charmbracelet/bubbletea"
-        "os"
+	"os"
+	"os/user"
+	"path/filepath"
+	"strings"
 )
 
-func check(e error) {
-        if e != nil {
-                panic(e)
-        }
+/*
+	type Config struct {
+		Key string 'toml:"key"'
+	}
+
+	type Provider struct {
+		DigitalOcean	Config 'toml:"digitalocean"'
+		Linode		Config 'toml:"linode"'
+		Vultr		Config 'toml:"vultr"'
+	}
+
+var cfg Provider
+_, err := toml.DecodeFile("provider_credentials.toml", &cfg)
+*/
+
+func ExpandPath(path string) string {
+	if strings.HasPrefix(path, "~") {
+		usr, _ := user.Current()
+		return filepath.Join(usr.HomeDir, strings.TrimPrefix(path, "~"))
+	}
+	return path
 }
 
-func EnvChecks {
-
-}
-
-func makeTempDir() {
-        tmpdir, err := os.MkdirTemp("", "tmp.*")
-        check(err)
-        fmt.Println("Temp dir created -", tmpdir)
-}
-
-func EnvChecks() {
-        // Check for temp directory
-        if os. 
+func DirExists(path string) bool {
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return false
+	}
+	return err == nil && info.IsDir()
 }
