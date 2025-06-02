@@ -3,22 +3,11 @@ package utils
 import (
 	"io"
 	"os"
+	"strings"
+
+	"github.com/BurntSushi/toml"
+	"github.com/emancipat3r/vps3/logger"
 )
-
-/*
-	type Config struct {
-		Key string 'toml:"key"'
-	}
-
-	type Provider struct {
-		DigitalOcean	Config 'toml:"digitalocean"'
-		Linode		Config 'toml:"linode"'
-		Vultr		Config 'toml:"vultr"'
-	}
-
-var cfg Provider
-_, err := toml.DecodeFile("provider_credentials.toml", &cfg)
-*/
 
 func DirExists(path string) bool {
 	info, err := os.Stat(path)
@@ -59,4 +48,46 @@ func CopyFile(src, dst string) error {
 
 func MakeDirectory(path string) error {
 	return os.MkdirAll(path, 0755)
+}
+
+type Config struct {
+	Key string `toml:"key"`
+}
+
+type Provider struct {
+	DigitalOcean	Config 'toml:"digitalocean"'
+	Linode			Config 'toml:"linode"'
+	Vultr			Config 'toml:"vultr"'
+}
+
+var cfg Provider
+
+func ParseCreds(path string, choice string) string {
+	_, err := toml.DecodeFile(path, &cfg)
+	if err != nil {
+		logger.Error("Error parsing credentials file at %s: %v", path, err)
+	}
+
+	choice = strings.ToLower(choice)
+
+	var key string
+	switch choice {
+	case "digitalocean":
+		key = cfg.DigitalOcean.Key
+	case "linode":
+		key = cfg.Linode.Key
+	case "vultr":
+		key = cfg.Vultr.Key
+	default:
+		logger.Error("Invalid provider choice: %s", choice)
+		return ""
+	}
+
+	if key == "" {
+		logger.Error("Missing %s key in credentials file", choice)
+		return ""
+	}
+
+	return key
+}
 }
