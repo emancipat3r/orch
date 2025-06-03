@@ -55,9 +55,9 @@ type Config struct {
 }
 
 type Provider struct {
-	DigitalOcean	Config 'toml:"digitalocean"'
-	Linode			Config 'toml:"linode"'
-	Vultr			Config 'toml:"vultr"'
+	DigitalOcean Config `toml:"digitalocean"`
+	Linode       Config `toml:"linode"`
+	Vultr        Config `toml:"vultr"`
 }
 
 var cfg Provider
@@ -65,7 +65,7 @@ var cfg Provider
 func ParseCreds(path string, choice string) string {
 	_, err := toml.DecodeFile(path, &cfg)
 	if err != nil {
-		logger.Error("Error parsing credentials file at %s: %v", path, err)
+		logger.Error("Error parsing credentials file at " + path + ": " + err.Error())
 	}
 
 	choice = strings.ToLower(choice)
@@ -79,15 +79,14 @@ func ParseCreds(path string, choice string) string {
 	case "vultr":
 		key = cfg.Vultr.Key
 	default:
-		logger.Error("Invalid provider choice: %s", choice)
+		logger.Error("Invalid provider choice: " + choice)
 		return ""
 	}
 
 	if key == "" {
-		logger.Error("Missing %s key in credentials file", choice)
+		logger.Error("Missing " + choice + " key in credentials file")
 		return ""
 	}
 
 	return key
-}
 }
