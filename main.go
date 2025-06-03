@@ -1,20 +1,32 @@
 package main
 
 import (
+	"os/user"
+
 	"github.com/emancipat3r/vps3/logger"
-	"github.com/emancipat3r/vps3/ui"
 	"github.com/emancipat3r/vps3/utils"
 )
 
 func main() {
-	path := "./creds"
-	logger.Info(path)
+	user, err := user.Current()
+	if err != nil {
+		logger.Error("Failed to get current user: " + err.Error())
+		return
+	}
+
+	path := ""
+
+	if user.Username == "root" {
+		path = "/root/.config/vps/config/"
+	} else {
+		path = user.HomeDir + "/.config/vps/config/"
+	}
 
 	// Check if directory exists
 	if utils.DirExists(path) {
-		logger.Info("Creds directory exists")
+		logger.Info("Provider configuration directory exists - " + path + ". Moving along.")
 	} else {
-		logger.Warn("Creds directory doesn't exist. Creating...")
+		logger.Warn("Provider configuration directory doesn't exist. Creating - " + path)
 		err := utils.MakeDirectory(path)
 		if err != nil {
 			logger.Error("Failed to create directory: " + err.Error())
@@ -31,23 +43,11 @@ func main() {
 	}
 
 	// Check for credentials file
-	if utils.FileExists(path + "/credentials.json") {
-		logger.Info("Credentials file exists")
+	configFile := path + "configuration.json"
+	if utils.FileExists(configFile) {
+		logger.Info("Provider configuration file exists - " + configFile)
 	} else {
-		logger.Warn("Credentials file missing")
-		shouldLoad := ui.Confirm("Do you want to provide a path to an existing credentials file?")
-		if shouldLoad {
-			newPath := ui.Input("Enter path to credentials file:")
-			if utils.FileExists(newPath) {
-				// Copy or move file
-				utils.CopyFile(newPath, path+"/credentials.json")
-				logger.Success("Credentials loaded.")
-			} else {
-				logger.Error("Provided file does not exist.")
-			}
-		} else {
-			logger.Warn("No credentials loaded. Exiting...")
-			return
-		}
+		logger.Warn("Provider configuration file missing. Exiting...")
+		return
 	}
 }
