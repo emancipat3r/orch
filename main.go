@@ -2,8 +2,10 @@ package main
 
 import (
 	"os/user"
+	"time"
 
 	"github.com/emancipat3r/vps3/logger"
+	"github.com/emancipat3r/vps3/ui"
 	"github.com/emancipat3r/vps3/utils"
 )
 
@@ -24,7 +26,7 @@ func main() {
 
 	// Check if directory exists
 	if utils.DirExists(path) {
-		logger.Info("Provider configuration directory exists - " + path + ". Moving along.")
+		logger.Info("Provider configuration directory exists - " + path + ". Moving along...")
 	} else {
 		logger.Warn("Provider configuration directory doesn't exist. Creating - " + path)
 		err := utils.MakeDirectory(path)
@@ -42,12 +44,22 @@ func main() {
 		}
 	}
 
+	time.Sleep(1 * time.Second)
+
 	// Check for credentials file
-	configFile := path + "configuration.json"
+	configFile := path + "configuration.toml"
 	if utils.FileExists(configFile) {
 		logger.Info("Provider configuration file exists - " + configFile)
 	} else {
 		logger.Warn("Provider configuration file missing. Exiting...")
 		return
 	}
+
+	time.Sleep(1 * time.Second)
+
+	provider := ui.ChoiceProvider()
+
+	providerKey := utils.ParseCreds(configFile, provider)
+
+	logger.Info("Provider key is - " + providerKey)
 }
