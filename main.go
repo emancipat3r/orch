@@ -2,7 +2,6 @@ package main
 
 import (
 	"os/user"
-	"time"
 
 	"github.com/emancipat3r/vps3/logger"
 	"github.com/emancipat3r/vps3/ui"
@@ -26,7 +25,7 @@ func main() {
 
 	// Check if directory exists
 	if utils.DirExists(path) {
-		logger.Info("Provider configuration directory exists - " + path + ". Moving along...")
+		logger.Info("Provider configuration directory exists: " + path + ". Moving along...")
 	} else {
 		logger.Warn("Provider configuration directory doesn't exist. Creating - " + path)
 		err := utils.MakeDirectory(path)
@@ -37,29 +36,25 @@ func main() {
 
 		// Check if directory was created successfully
 		if utils.DirExists(path) {
-			logger.Success("Directory created - " + path)
+			logger.Success("Directory created: " + path)
 		} else {
 			logger.Error("Failed to create directory. Exiting...")
 			return
 		}
 	}
 
-	time.Sleep(1 * time.Second)
-
 	// Check for credentials file
 	configFile := path + "configuration.toml"
 	if utils.FileExists(configFile) {
-		logger.Info("Provider configuration file exists - " + configFile)
+		logger.Info("Provider configuration file exists: " + configFile)
 	} else {
 		logger.Warn("Provider configuration file missing. Exiting...")
 		return
 	}
 
-	time.Sleep(1 * time.Second)
-
+	// Ask for provider
 	provider := ui.ChoiceProvider()
 
-	providerKey := utils.ParseCreds(configFile, provider)
-
-	logger.Info("Provider key is - " + providerKey)
+	// Parse provider credentials from configuration file
+	utils.GetLinodeAPIKey(configFile, provider)
 }
