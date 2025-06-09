@@ -56,5 +56,9 @@ func main() {
 	provider := ui.ChoiceProvider()
 
 	// Parse provider credentials from configuration file
-	utils.GetLinodeAPIKey(configFile, provider)
+	providerKey := utils.GetLinodeAPIKey(configFile, provider)
+
+	logger.Info("Provider Key: " + providerKey)
+
+	utils.GetLinodeAccount(providerKey)
 }
