@@ -21,6 +21,12 @@ func log(style lipgloss.Style, label, msg string) {
 	fmt.Printf("%s %s %s\n", ts, style.Render("["+label+"]"), msg)
 }
 
+func Errorf(format string, args ...interface{}) error {
+	msg := fmt.Sprintf(format, args...)
+	log(errorStyle, "ERROR", msg)
+	return fmt.Errorf(msg)
+}
+
 func Info(msg string)    { log(infoStyle, "INFO", msg) }
 func Debug(msg string)   { log(debugStyle, "DEBUG", msg) }
 func Warn(msg string)    { log(warnStyle, "WARN", msg) }

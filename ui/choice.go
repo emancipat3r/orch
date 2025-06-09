@@ -18,6 +18,6 @@ func ChoiceProvider() string {
 		Value(&provider).
 		Run()
 
-	logger.Info("You selected - " + provider)
+	logger.Info("You selected: " + provider)
 	return provider
 }
