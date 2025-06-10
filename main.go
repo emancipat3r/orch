@@ -60,5 +60,11 @@ func main() {
 
 	logger.Info("Provider Key: " + providerKey)
 
-	utils.GetLinodeAccount(providerKey)
+	resp, err := utils.ListLinodes(providerKey)
+	if err != nil {
+		logger.Error("Failed to hit endpoint: " + err.Error())
+		return
+	}
+
+	logger.Info(resp)
 }
