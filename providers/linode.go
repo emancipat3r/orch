@@ -21,37 +21,6 @@ func GetLinodeAPIKey(configFile string, provider string) string {
 	return providerKey
 }
 
-func GetLinodeAccount(providerKey string) (string, error) {
-	if providerKey == "" {
-		return "", logger.Errorf("Provider key is empty")
-	}
-
-	request, err := http.NewRequest("GET", "https://api.linode.com/v4/account", nil)
-	if err != nil {
-		return "", err
-	}
-	request.Header.Set("Authorization", "Bearer "+providerKey)
-
-	client := &http.Client{}
-	response, err := client.Do(request)
-	if err != nil {
-		return "", err
-	}
-	defer response.Body.Close()
-
-	responseBytes, err := io.ReadAll(response.Body)
-	if err != nil {
-		return "", err
-	}
-
-	if response.StatusCode != http.StatusOK {
-		return "", logger.Errorf("Unexpected status code: %s | %s", strconv.Itoa(response.StatusCode), string(responseBytes))
-	}
-
-	formattedResponse := utils.PrettyPrintJSON(responseBytes)
-	return formattedResponse, nil
-}
-
 func ListLinodes(providerKey string) (string, error) {
 	if providerKey == "" {
 		return "", logger.Errorf("Provider key is empty")
