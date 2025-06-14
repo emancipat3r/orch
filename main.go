@@ -2,10 +2,12 @@ package main
 
 import (
 	"os/user"
+	"strings"
 
 	"github.com/emancipat3r/vps3/logger"
 	"github.com/emancipat3r/vps3/ui"
 	"github.com/emancipat3r/vps3/utils"
+	"github.com/emancipat3r/vps3/providers"
 )
 
 func main() {
@@ -56,7 +58,9 @@ func main() {
 	provider := ui.ChoiceProvider()
 
 	// Parse provider credentials from configuration file
-	providerKey := utils.GetLinodeAPIKey(configFile, provider)
+	providerKey :=  .GetLinodeAPIKey(configFile, provider)
+
+	utils
 
 	logger.Info("Provider Key: " + providerKey)
 
