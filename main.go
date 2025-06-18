@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os/user"
 
 	"github.com/emancipat3r/vps3/logger"
@@ -16,7 +17,7 @@ func main() {
 		return
 	}
 
-	path := ""
+	var path string
 
 	if user.Username == "root" {
 		path = "/root/.config/vps/config/"
@@ -61,13 +62,16 @@ func main() {
 
 	logger.Info("Provider Key: " + providerKey)
 
-	resp, err := providers.ListLinodeRegions(providerKey)
+	regions, err := providers.GetLinodeRegions(providerKey)
 	if err != nil {
 		logger.Error("Failed to hit endpoint: " + err.Error())
 		return
 	}
 
-	logger.Info(resp)
+	for _, region := range regions {
+		fmt.Printf("ID %-10s | Country: %-2s | Status: %s\n", region.ID, region.Country, region.Status)
+	}
+
 }
 
 /*

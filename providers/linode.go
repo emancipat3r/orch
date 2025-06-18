@@ -2,6 +2,8 @@ package providers
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -52,35 +54,48 @@ func ListLinodes(providerKey string) (string, error) {
 	return formattedResponse, nil
 }
 
-func ListLinodeRegions(providerKey string) (string, error) {
+type Region struct {
+	ID       string `json:"id"`
+	Country  string `json:"country"`
+	Endpoint string `json:"endpoint"`
+	Status   string `json:"status"`
+}
+
+type RegionsResponse struct {
+	Data []Region `json:"data"`
+}
+
+func GetLinodeRegions(providerKey string) ([]Region, error) {
 	if providerKey == "" {
-		return "", logger.Errorf("Provider key is empty")
+		return nil, logger.Errorf("Provider key is empty")
 	}
 
-	request, err := http.NewRequest("GET", "https://api.linode.com/v4/regions", nil)
+	req, err := http.NewRequest("GET", "https://api.linode.com/v4/regions", nil)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	request.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", "application/json")
 
 	client := &http.Client{}
-	response, err := client.Do(request)
+	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	defer response.Body.Close()
+	defer resp.Body.Close()
 
-	responseBytes, err := io.ReadAll(response.Body)
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		fmt.Print(bodyBytes)
+		return nil, logger.Errorf("Unexpected status code: %d | %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var regionsResp RegionsResponse
+	err = json.NewDecoder(resp.Body).Decode(&regionsResp)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	if response.StatusCode != http.StatusOK {
-		return "", logger.Errorf("Unexpected status code: %s | %s", strconv.Itoa(response.StatusCode), string(responseBytes))
-	}
-
-	formattedResponse := utils.PrettyPrintJSON(responseBytes)
-	return formattedResponse, nil
+	return regionsResp.Data, nil
 }
 
 func CreateLinode(providerKey string) (string, error) {
