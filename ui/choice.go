@@ -2,7 +2,6 @@ package ui
 
 import (
 	"github.com/charmbracelet/huh"
-	"github.com/emancipat3r/vps3/logger"
 )
 
 func ChoiceProvider() string {
@@ -18,6 +17,5 @@ func ChoiceProvider() string {
 		Value(&provider).
 		Run()
 
-	logger.Info("You selected: " + provider)
 	return provider
 }

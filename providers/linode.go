@@ -65,11 +65,7 @@ type RegionsResponse struct {
 	Data []Region `json:"data"`
 }
 
-func GetLinodeRegions(providerKey string) ([]Region, error) {
-	if providerKey == "" {
-		return nil, logger.Errorf("Provider key is empty")
-	}
-
+func GetLinodeRegions() ([]Region, error) {
 	req, err := http.NewRequest("GET", "https://api.linode.com/v4/regions", nil)
 	if err != nil {
 		return nil, err

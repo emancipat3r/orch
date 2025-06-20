@@ -27,9 +27,9 @@ func main() {
 
 	// Check if directory exists
 	if utils.DirExists(path) {
-		logger.Info("Provider configuration directory exists: " + path + ". Moving along...")
+		logger.Info("Provider configuration directory exists: " + logger.Highlight(path) + ". Moving along...")
 	} else {
-		logger.Warn("Provider configuration directory doesn't exist. Creating - " + path)
+		logger.Warn("Provider configuration directory doesn't exist. Creating - " + logger.Highlight(path))
 		err := utils.MakeDirectory(path)
 		if err != nil {
 			logger.Error("Failed to create directory: " + err.Error())
@@ -38,7 +38,7 @@ func main() {
 
 		// Check if directory was created successfully
 		if utils.DirExists(path) {
-			logger.Success("Directory created: " + path)
+			logger.Success("Directory created: " + logger.Highlight(path))
 		} else {
 			logger.Error("Failed to create directory. Exiting...")
 			return
@@ -48,7 +48,7 @@ func main() {
 	// Check for credentials file
 	configFile := path + "configuration.toml"
 	if utils.FileExists(configFile) {
-		logger.Info("Provider configuration file exists: " + configFile)
+		logger.Info("Provider configuration file exists: " + logger.Highlight(configFile))
 	} else {
 		logger.Warn("Provider configuration file missing. Exiting...")
 		return
@@ -57,19 +57,32 @@ func main() {
 	// Ask for provider
 	provider := ui.ChoiceProvider()
 
+	logger.Info("You selected: " + logger.Highlight(provider))
+
 	// Parse provider credentials from configuration file
 	providerKey := providers.GetLinodeAPIKey(configFile, provider)
 
-	logger.Info("Provider Key: " + providerKey)
+	// Print provider token/api
+	logger.Info("Provider Key: " + logger.Highlight(providerKey))
 
-	regions, err := providers.GetLinodeRegions(providerKey)
-	if err != nil {
-		logger.Error("Failed to hit endpoint: " + err.Error())
-		return
-	}
+	// Get list of regions
+	switch provider {
+	case "Linode":
+		regions, err := providers.GetLinodeRegions()
+		if err != nil {
+			logger.Error("Failed to hit endpoint: " + err.Error())
+			return
+		}
 
-	for _, region := range regions {
-		fmt.Printf("ID %-10s | Country: %-2s | Status: %s\n", region.ID, region.Country, region.Status)
+		for _, region := range regions {
+			fmt.Printf("ID %-10s | Country: %-2s | Status: %s\n", region.ID, region.Country, region.Status)
+		}
+	case "DigitalOcean":
+		logger.Info("Work in progress...")
+	case "Vultr":
+		logger.Info("Work in progress...")
+	default:
+		logger.Warn("No provider was selected. Exiting...")
 	}
 
 }
