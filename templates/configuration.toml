@@ -1,0 +1,9 @@
+[digitalocean]
+key = "digitalocean_key"
+
+[linode]
+key = "linode_key"
+
+[vultr]
+key = "vultr_key"
+

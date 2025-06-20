@@ -14,6 +14,7 @@ var (
 	warnStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true)
 	errorStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
 	successStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
+	highlightStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Bold(true)
 )
 
 func log(style lipgloss.Style, label, msg string) {
@@ -25,6 +26,10 @@ func Errorf(format string, args ...interface{}) error {
 	msg := fmt.Sprintf(format, args...)
 	log(errorStyle, "ERROR", msg)
 	return fmt.Errorf(msg)
+}
+
+func Highlight(text string) string {
+	return highlightStyle.Render(text)
 }
 
 func Info(msg string)    { log(infoStyle, "INFO", msg) }
