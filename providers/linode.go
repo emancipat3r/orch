@@ -23,6 +23,46 @@ func GetLinodeAPIKey(configFile string, provider string) string {
 	return providerKey
 }
 
+type Account struct {
+	Balance           float64 `json:"balance"`
+	BalanceUninvoiced float64 `json:"balance_uninvoiced"`
+}
+
+func GetLinodesBalance(providerKey string) (string, error) {
+	if providerKey == "" {
+		return "", logger.Errorf("Provider key is empty")
+	}
+
+	req, err := http.NewRequest("GET", "https://api.linode.com/v4/account", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+providerKey)
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		fmt.Print(bodyBytes)
+		return "", logger.Errorf("Unexpected status code: %d | %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var account Account
+	err = json.NewDecoder(resp.Body).Decode(&account)
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("%.2f", account.Balance), nil
+
+}
+
 func ListLinodes(providerKey string) (string, error) {
 	if providerKey == "" {
 		return "", logger.Errorf("Provider key is empty")
@@ -32,7 +72,7 @@ func ListLinodes(providerKey string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	request.Header.Set("Authorization", "Bearer "+providerKey)
+	request.Header.Set("Accept", "application/json")
 
 	client := &http.Client{}
 	response, err := client.Do(request)
@@ -55,10 +95,10 @@ func ListLinodes(providerKey string) (string, error) {
 }
 
 type Region struct {
-	ID       string `json:"id"`
-	Country  string `json:"country"`
-	Endpoint string `json:"endpoint"`
-	Status   string `json:"status"`
+	ID      string `json:"id"`
+	Country string `json:"country"`
+	Label   string `json:"label"`
+	Status  string `json:"status"`
 }
 
 type RegionsResponse struct {
@@ -92,6 +132,43 @@ func GetLinodeRegions() ([]Region, error) {
 	}
 
 	return regionsResp.Data, nil
+}
+
+type Image struct {
+	Label string `json:"label"`
+}
+
+type ImagesResponse struct {
+	Data []Image `json:"data"`
+}
+
+func GetLinodeImages() ([]Image, error) {
+	req, err := http.NewRequest("GET", "https://api.linode.com/v4/images?page=1&page_size=100", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		fmt.Print(bodyBytes)
+		return nil, logger.Errorf("Unexpected status code: %d | %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var imagesResp ImagesResponse
+	err = json.NewDecoder(resp.Body).Decode(&imagesResp)
+	if err != nil {
+		return nil, err
+	}
+
+	return imagesResp.Data, nil
 }
 
 func CreateLinode(providerKey string) (string, error) {
