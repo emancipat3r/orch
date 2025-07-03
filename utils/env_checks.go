@@ -1,7 +1,9 @@
 package utils
 
 import (
+	"crypto/rand"
 	"io"
+	"math/big"
 	"os"
 	"strings"
 
@@ -89,4 +91,18 @@ func ParseCreds(path string, choice string) string {
 	}
 
 	return key
+}
+
+const alphaNum = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+func GenerateRandomPassword(length int) (string, error) {
+	pass := make([]byte, length)
+	for i := range pass {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(alphanum))))
+		if err != nil {
+			return "", err
+		}
+		pass[i] = alphanum[n.Int64()]
+	}
+	return string(pass), nil
 }
