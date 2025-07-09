@@ -171,6 +171,44 @@ func GetLinodeImages() ([]Image, error) {
 	return imagesResp.Data, nil
 }
 
+type Resource struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+type ResourcesResponse struct {
+	Data []Resource `json:"data"`
+}
+
+func GetLinodeResources() ([]Resource, error) {
+	req, err := http.NewRequest("GET", "https://api.linode.com/v4/linode/types", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		fmt.Print(bodyBytes)
+		return nil, logger.Errorf("Unexpected status code: %d | %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var resourcesResp ResourcesResponse
+	err = json.NewDecoder(resp.Body).Decode(&resourcesResp)
+	if err != nil {
+		return nil, err
+	}
+
+	return resourcesResp.Data, nil
+}
+
 func CreateLinode(providerKey string) (string, error) {
 	if providerKey == "" {
 		return "", logger.Errorf("Provider key is empty")

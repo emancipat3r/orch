@@ -98,11 +98,11 @@ const alphaNum = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
 func GenerateRandomPassword(length int) (string, error) {
 	pass := make([]byte, length)
 	for i := range pass {
-		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(alphanum))))
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(alphaNum))))
 		if err != nil {
 			return "", err
 		}
-		pass[i] = alphanum[n.Int64()]
+		pass[i] = alphaNum[n.Int64()]
 	}
 	return string(pass), nil
 }
