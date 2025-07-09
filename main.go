@@ -18,7 +18,7 @@ func main() {
 		return
 	}
 
-	var pathConfig, pathSSH, privateKeyPath, publicKeyPath string
+	var pathConfig, pathSSH, pathSecrets, privateKeyPath, publicKeyPath string
 
 	pathConfig = user.HomeDir + "/.config/vps/config/"
 	pathSSH = user.HomeDir + "/.config/vps/.ssh/"
@@ -82,8 +82,9 @@ func main() {
 	} else {
 		logger.Warn("SSH keypair missing. Creating...")
 
+		var password string
 		// Generate random password
-		pass, err = utils.GenerateRandomPassword()
+		password, err = utils.GenerateRandomPassword(30)
 		if err != nil {
 			logger.Error("Failed to generate random password for SSH keypair: " + err.Error())
 			return
@@ -93,16 +94,19 @@ func main() {
 		_ = os.WriteFile(pathSecrets+"sshkeysecret.txt", []byte(password+"\n"), 0600)
 
 		// Create keypair
-		k, err := keygen.New(pathSSH, keygen.WithKeyType(keygen.Ed25519), keygen.WithPassphrase(pass))
+		_, err = keygen.New(privateKeyPath, keygen.WithKeyType(keygen.Ed25519), keygen.WithPassphrase(password), keygen.WithWrite())
 		if err != nil {
 			logger.Error("Failed to create SSH keypair: " + err.Error())
-			return err
+			return
 		}
-		
+
 		// Check if privateKeyPath and publicKeyPath are true
-		if {
-			logger.Success(": " + logger.Highlight(pathSSH))
+		if utils.FileExists(privateKeyPath) && utils.FileExists(publicKeyPath) {
+			logger.Info("SSH private key exists: " + logger.Highlight(privateKeyPath))
+			logger.Info("SSH public key exists: " + logger.Highlight(publicKeyPath))
 		} else {
+			logger.Error("Still failed to create SSH keypair (files still missing).")
+			return
 
 		}
 
@@ -166,11 +170,22 @@ func main() {
 		selectedImage := ui.Select("Select your image:", imageOptions)
 		logger.Info("Your selected image: " + logger.Highlight(selectedImage))
 
-		// Earlier in proc need to check for / create a SSH key
-
 		// Fetch resources
+		resources, err := providers.GetLinodeResources()
+		if err != nil {
+			logger.Error("Failed to hit endpoint: " + err.Error())
+			return
+		}
 
-		// Ask user resources
+		// Add requested / parsed JSON to resourceOptions slice
+		var resourceOptions []string
+		for _, resource := range resources {
+			resourceOptions = append(resourceOptions, resource.ID+" - "+resource.Label)
+		}
+
+		// Ask user region
+		selectedResource := ui.Select("Select your resourcing:", resourceOptions)
+		logger.Info("You selected region: " + logger.Highlight(selectedResource))
 
 		// Send create linode request
 
@@ -196,5 +211,4 @@ func main() {
 	default:
 		logger.Warn("No provider was selected. Exiting...")
 	}
-
 }
