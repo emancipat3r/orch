@@ -47,14 +47,27 @@ func GetLinodesBalance(providerKey string) (string, error) {
 	}
 	defer resp.Body.Close()
 
+	bodyBytes, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		fmt.Print(bodyBytes)
-		return "", logger.Errorf("Unexpected status code: %d | %s", resp.StatusCode, string(bodyBytes))
+		var errResp struct {
+			Errors []struct {
+				Reason string `json:"reason"`
+			} `json:"errors"`
+		}
+
+		if err := json.Unmarshal(bodyBytes, &errResp); err == nil && len(errResp.Errors) > 0 {
+			reason := errResp.Errors[0].Reason
+			if reason == "Invalid Token" {
+				return "", logger.Errorf("Your Linode key is invalid or expired. Check it in the config.")
+			}
+
+			return "", logger.Errorf("Linode API error %s", reason)
+		}
 	}
 
 	var account Account
-	err = json.NewDecoder(resp.Body).Decode(&account)
+	err = json.Unmarshal(bodyBytes, &account)
 	if err != nil {
 		return "", err
 	}
