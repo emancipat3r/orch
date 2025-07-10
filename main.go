@@ -131,8 +131,11 @@ func main() {
 	switch provider {
 	case "Linode":
 		// Fetch account balance
-		accountBalance, _ := providers.GetLinodesBalance(providerKey)
-		logger.Info("Linode account balance: " + logger.Highlight(accountBalance))
+		accountBalance, err := providers.GetLinodesBalance(providerKey)
+		if err != nil {
+			os.Exit(1)
+		}
+		logger.Info("Linode account balance: " + logger.Highlight("$"+accountBalance))
 
 		// Fetch regions
 		regions, err := providers.GetLinodeRegions()
