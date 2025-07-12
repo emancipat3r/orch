@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"json"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/emancipat3r/vps3/logger"
@@ -222,15 +224,40 @@ func GetLinodeResources() ([]Resource, error) {
 	return resourcesResp.Data, nil
 }
 
-func CreateLinode(providerKey string) (string, error) {
+type LinodeCreateRequest struct {
+	Booted         bool     `json:"booted"`
+	SwapSize       int      `json:"swap_size"`
+	AuthorizedKeys []string `json:"authorized_keys"`
+	Image     string `json:"image"`
+	Region    string `json:"region"`
+	Type      string `json:"type"`
+	RootPass  string `json:"root_pass"`
+}
+
+func CreateLinode(providerKey, pubKeyPath, image, region, type, rootpass string) (string, error) {
 	if providerKey == "" {
 		return "", logger.Errorf("Provider key is empty")
 	}
 
-	jsonBody := []byte(`{
- 		"booted": true,
- 		"swap_size": 512
-	}`)
+	data, err := os.ReadFile(pubKeyPath)
+	if err != nil {
+		return "", err
+	}
+
+	payload := LinodeCreateRequest{
+		Booted: true,
+		SwapSize: 512,
+		AuthorizedKeys: []string{string(data)},
+		Image: image,
+		Region: region,
+		Type: type,
+		RootPass: rootpass,
+	}
+
+	jsonBody, err := json.Marshal(payload) 
+	if err != nil {
+		logger.Warn("Failed to marshal request payload: %v", err))
+	}
 	request, err := http.NewRequest("POST", "https://api.linode.com/v4/linode/instances", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return "", err
