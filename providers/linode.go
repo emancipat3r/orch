@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/emancipat3r/vps3/logger"
 
@@ -150,6 +151,7 @@ func GetLinodeRegions() ([]Region, error) {
 
 type Image struct {
 	Label string `json:"label"`
+	ID    string `json:"id"`
 }
 
 type ImagesResponse struct {
@@ -243,10 +245,14 @@ func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass str
 		return "", err
 	}
 
+	dataString := string(data)
+	dataStringStripped := strings.TrimSpace(dataString)
+	fmt.Println(dataStringStripped)
+
 	payload := LinodeCreateRequest{
 		Booted:         true,
 		SwapSize:       512,
-		AuthorizedKeys: []string{string(data)},
+		AuthorizedKeys: []string{dataStringStripped},
 		Image:          image,
 		Region:         region,
 		Type:           resource,

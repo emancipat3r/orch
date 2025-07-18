@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/user"
+	"strings"
 
 	"github.com/charmbracelet/keygen"
 	"github.com/emancipat3r/vps3/logger"
@@ -146,6 +147,8 @@ func main() {
 		selectedRegion := ui.Select("Select your region:", regionOptions)
 		logger.Info("You selected region: " + logger.Highlight(selectedRegion))
 
+		selectedRegionSplit := strings.Split(selectedRegion, " ")
+
 		// Fetch image types
 		images, err := providers.GetLinodeImages()
 		if err != nil {
@@ -156,12 +159,14 @@ func main() {
 		// Add requested/parsed JSON to imageOptions slice
 		var imageOptions []string
 		for _, image := range images {
-			imageOptions = append(imageOptions, image.Label)
+			imageOptions = append(imageOptions, image.ID+" - "+image.Label)
 		}
 
 		// Ask user image
 		selectedImage := ui.Select("Select your image:", imageOptions)
 		logger.Info("Your selected image: " + logger.Highlight(selectedImage))
+
+		selectedImageSplit := strings.Split(selectedImage, " ")
 
 		// Fetch resources
 		resources, err := providers.GetLinodeResources()
@@ -178,7 +183,9 @@ func main() {
 
 		// Ask user region
 		selectedResource := ui.Select("Select your resourcing:", resourceOptions)
-		logger.Info("You selected region: " + logger.Highlight(selectedResource))
+		logger.Info("You selected type: " + logger.Highlight(selectedResource))
+
+		selectedResourceSplit := strings.Split(selectedResource, " ")
 
 		var rootPassword string
 		// Generate random password
@@ -189,13 +196,68 @@ func main() {
 		}
 
 		// Create Linode
-		// func CreateLinode(providerKey, pubKeyPath, image, region, type, rootPass string) (string, error)
 		logger.Info("Creating Linode...")
-		createResponse, err := providers.CreateLinode(providerKey, publicKeyPath, selectedImage, selectedRegion, selectedResource, rootPassword)
+		createResponse, err := providers.CreateLinode(providerKey, publicKeyPath, selectedImageSplit[0], selectedRegionSplit[0], selectedResourceSplit[0], rootPassword)
 		if err != nil {
 			logger.Error("Failed to create Linode: " + err.Error())
 		}
 		logger.Debug(logger.Highlight("Response:\n") + createResponse)
+
+		// Write json output to instance file
+		// Earlier list linodes
+		// Need sub command options if no options default to create linode if list or delete subcommand or choice list
+
+		/*
+			 {
+			  "alerts": {
+			    "cpu": 90,
+			    "io": 10000,
+			    "network_in": 10,
+			    "network_out": 10,
+			    "transfer_quota": 80
+			  },
+			  "backups": {
+			    "available": false,
+			    "enabled": false,
+			    "last_successful": null,
+			    "schedule": {
+			      "day": null,
+			      "window": null
+			    }
+			  },
+			  "capabilities": [],
+			  "created": "2025-07-18T02:56:19",
+			  "disk_encryption": "enabled",
+			  "group": "",
+			  "has_user_data": false,
+			  "host_uuid": "b2fa42934d38726a3bfae96212b57681f45b7eec",
+			  "hypervisor": "kvm",
+			  "id": 80368586,
+			  "image": "linode/almalinux8",
+			  "ipv4": [
+			    "194.195.116.217"
+			  ],
+			  "ipv6": "2400:8904::2000:a7ff:fee4:c178/128",
+			  "label": "linode80368586",
+			  "lke_cluster_id": null,
+			  "placement_group": null,
+			  "region": "ap-west",
+			  "site_type": "core",
+			  "specs": {
+			    "accelerated_devices": 0,
+			    "disk": 25600,
+			    "gpus": 0,
+			    "memory": 1024,
+			    "transfer": 1000,
+			    "vcpus": 1
+			  },
+			  "status": "provisioning",
+			  "tags": [],
+			  "type": "g6-nanode-1",
+			  "updated": "2025-07-18T02:56:19",
+			  "watchdog_enabled": true
+			}
+		*/
 
 	case "DigitalOcean":
 		logger.Info("Work in progress...")
