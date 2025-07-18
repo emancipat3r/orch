@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"json"
 	"net/http"
 	"os"
 	"strconv"
@@ -228,13 +227,13 @@ type LinodeCreateRequest struct {
 	Booted         bool     `json:"booted"`
 	SwapSize       int      `json:"swap_size"`
 	AuthorizedKeys []string `json:"authorized_keys"`
-	Image     string `json:"image"`
-	Region    string `json:"region"`
-	Type      string `json:"type"`
-	RootPass  string `json:"root_pass"`
+	Image          string   `json:"image"`
+	Region         string   `json:"region"`
+	Type           string   `json:"type"`
+	RootPass       string   `json:"root_pass"`
 }
 
-func CreateLinode(providerKey, pubKeyPath, image, region, type, rootpass string) (string, error) {
+func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass string) (string, error) {
 	if providerKey == "" {
 		return "", logger.Errorf("Provider key is empty")
 	}
@@ -245,19 +244,20 @@ func CreateLinode(providerKey, pubKeyPath, image, region, type, rootpass string)
 	}
 
 	payload := LinodeCreateRequest{
-		Booted: true,
-		SwapSize: 512,
+		Booted:         true,
+		SwapSize:       512,
 		AuthorizedKeys: []string{string(data)},
-		Image: image,
-		Region: region,
-		Type: type,
-		RootPass: rootpass,
+		Image:          image,
+		Region:         region,
+		Type:           resource,
+		RootPass:       rootPass,
 	}
 
-	jsonBody, err := json.Marshal(payload) 
+	jsonBody, err := json.Marshal(payload)
 	if err != nil {
-		logger.Warn("Failed to marshal request payload: %v", err))
+		logger.Errorf("Failed to marshal request payload: %v", err)
 	}
+
 	request, err := http.NewRequest("POST", "https://api.linode.com/v4/linode/instances", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return "", err
@@ -277,10 +277,9 @@ func CreateLinode(providerKey, pubKeyPath, image, region, type, rootpass string)
 		return "", err
 	}
 
-	if response.StatusCode != http.StatusOK {
+	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated {
 		return "", logger.Errorf("Unexpected status code: %s | %s", strconv.Itoa(response.StatusCode), string(responseBytes))
 	}
 
-	formattedResponse := utils.PrettyPrintJSON(responseBytes)
-	return formattedResponse, nil
+	return utils.PrettyPrintJSON(responseBytes), nil
 }
