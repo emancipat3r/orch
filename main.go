@@ -107,9 +107,7 @@ func main() {
 		} else {
 			logger.Error("Still failed to create SSH keypair (files still missing).")
 			return
-
 		}
-
 	}
 
 	// Ask for provider
@@ -120,14 +118,6 @@ func main() {
 	// Parse provider credentials from configuration file
 	providerKey := providers.GetLinodeAPIKey(configFile, provider)
 
-	// Print provider token/api
-	logger.Info("Provider Key: " + logger.Highlight(providerKey))
-
-	// [x] Get list of regions
-	// [x] User choice of region
-	// [x] Get List of flavors (e.g. Linux distributions)
-	// [x] User choice flavor
-	// [ ] Get list of resource options for selected flavor
 	switch provider {
 	case "Linode":
 		// Fetch account balance
@@ -190,22 +180,22 @@ func main() {
 		selectedResource := ui.Select("Select your resourcing:", resourceOptions)
 		logger.Info("You selected region: " + logger.Highlight(selectedResource))
 
-		// Send create linode request
+		var rootPassword string
+		// Generate random password
+		rootPassword, err = utils.GenerateRandomPassword(30)
+		if err != nil {
+			logger.Error("Failed to generate root password for Linode: " + err.Error())
+			return
+		}
 
-		// Polling for when the Linode is up
-		// and available for work
-		//	- Wait 10s then curl
-		//
-		//	---------------------------------------------------
-		//
-		// Apparently you can curl to see the status of an endpoint
-		// (e.g. provisioning or running)
-		//
-		//	>    curl https://api.linode.com/v4/linode/instances \
-		//	>	-H "Authorization: Bearer $TOKEN" \
-		//	>	-H 'X-Filter: { "id": "linode_ID" }'
-
-		//
+		// Create Linode
+		// func CreateLinode(providerKey, pubKeyPath, image, region, type, rootPass string) (string, error)
+		logger.Info("Creating Linode...")
+		createResponse, err := providers.CreateLinode(providerKey, publicKeyPath, selectedImage, selectedRegion, selectedResource, rootPassword)
+		if err != nil {
+			logger.Error("Failed to create Linode: " + err.Error())
+		}
+		logger.Debug(logger.Highlight("Response:\n") + createResponse)
 
 	case "DigitalOcean":
 		logger.Info("Work in progress...")
