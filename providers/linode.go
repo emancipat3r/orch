@@ -7,9 +7,11 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 
+	"github.com/BurntSushi/toml"
 	"github.com/emancipat3r/vps3/logger"
 
 	"github.com/emancipat3r/vps3/utils"
@@ -235,7 +237,35 @@ type LinodeCreateRequest struct {
 	RootPass       string   `json:"root_pass"`
 }
 
-func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass string) (string, error) {
+type responseJSONBytes struct {
+	Creation_Time string   `json:"created"`
+	Host_UUID     string   `json:"host_uuid"`
+	Id            int      `json:"id"`
+	Host_Image    string   `json:"image"`
+	Ipv4          []string `json:"ipv4"`
+	Ipv6          string   `json:"ipv6"`
+	Label         string   `json:"label"`
+	Region        string   `json:"region"`
+	Type          string   `json:"type"`
+}
+
+type instance struct {
+	Creation_Time string   `toml:"created"`
+	Host_UUID     string   `toml:"host_uuid"`
+	Id            int      `toml:"id"`
+	Host_Image    string   `toml:"image"`
+	Ipv4          []string `toml:"ipv4"`
+	Ipv6          string   `toml:"ipv6"`
+	Label         string   `toml:"label"`
+	Region        string   `toml:"region"`
+	Type          string   `toml:"type"`
+}
+
+type instances struct {
+	Instances map[string]instance `toml:"instance"`
+}
+
+func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, instanceFile string) (string, error) {
 	if providerKey == "" {
 		return "", logger.Errorf("Provider key is empty")
 	}
@@ -283,8 +313,52 @@ func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass str
 		return "", err
 	}
 
+	var parsedResponseBytes responseJSONBytes
+	err = json.Unmarshal(responseBytes, &parsedResponseBytes)
+	if err != nil {
+		return "", err
+	}
+
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated {
 		return "", logger.Errorf("Unexpected status code: %s | %s", strconv.Itoa(response.StatusCode), string(responseBytes))
+	}
+
+	fmt.Printf("%v\n", parsedResponseBytes)
+	fmt.Println(reflect.TypeOf(parsedResponseBytes))
+
+	var allinstances instances
+	allinstances.Instances = make(map[string]instance)
+
+	VPS := instance{
+		Creation_Time: parsedResponseBytes.Creation_Time,
+		Host_UUID:     parsedResponseBytes.Host_UUID,
+		Id:            parsedResponseBytes.Id,
+		Host_Image:    parsedResponseBytes.Host_Image,
+		Ipv4:          parsedResponseBytes.Ipv4,
+		Ipv6:          parsedResponseBytes.Ipv6,
+		Label:         parsedResponseBytes.Label,
+		Region:        parsedResponseBytes.Region,
+		Type:          parsedResponseBytes.Type,
+	}
+
+	allinstances.Instances[VPS.Label] = VPS
+
+	logger.Info("Checking for instance file created")
+	f, err := os.Create(instanceFile)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	logger.Info("Encoding")
+	err = toml.NewEncoder(f).Encode(allinstances)
+	if err != nil {
+		return "", err
+	}
+
+	logger.Info("Wrote VPS creation instance file: " + logger.Highlight(instanceFile))
+	if err != nil {
+		return "", err
 	}
 
 	return utils.PrettyPrintJSON(responseBytes), nil

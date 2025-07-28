@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/user"
 	"strings"
@@ -19,19 +20,21 @@ func main() {
 		return
 	}
 
-	var pathConfig, pathSSH, pathSecrets, privateKeyPath, publicKeyPath string
+	var pathConfig, pathSSH, pathSecrets, pathInstances, instanceFile, privateKeyPath, publicKeyPath string
 
 	pathConfig = user.HomeDir + "/.config/vps/config/"
 	pathSSH = user.HomeDir + "/.config/vps/.ssh/"
 	pathSecrets = user.HomeDir + "/.config/vps/secrets/"
+	pathInstances = user.HomeDir + "/.config/vps/instances/"
+	instanceFile = pathInstances + "instances.toml"
 	privateKeyPath = user.HomeDir + "/.config/vps/.ssh/id_ed25519"
 	publicKeyPath = user.HomeDir + "/.config/vps/.ssh/id_ed25519.pub"
 
 	// Check if config directory exists
 	if utils.DirExists(pathConfig) {
-		logger.Info("Provider configuration directory exists: " + logger.Highlight(pathConfig) + ". Moving along...")
+		logger.Info("Configuration directory exists: " + logger.Highlight(pathConfig))
 	} else {
-		logger.Warn("Provider configuration directory doesn't exist. Creating - " + logger.Highlight(pathConfig))
+		logger.Warn("Configuration directory doesn't exist. Creating: " + logger.Highlight(pathConfig))
 		err := utils.MakeDirectory(pathConfig)
 		if err != nil {
 			logger.Error("Failed to create directory: " + err.Error())
@@ -47,9 +50,31 @@ func main() {
 		}
 	}
 
+	// Check instances dir exists
+	if utils.DirExists(pathInstances) {
+		logger.Info("Instances directory exists: " + logger.Highlight(pathInstances))
+	} else {
+		logger.Warn("Instances directory doesn't exist. Creating: " + logger.Highlight(pathInstances))
+		err := utils.MakeDirectory(pathInstances)
+		if err != nil {
+			logger.Error("Failed to create directory: " + logger.Highlight(pathInstances))
+		}
+	}
+
+	// Check secrets dir exists
+	if utils.DirExists(pathSecrets) {
+		logger.Info("Secrets directory exists: " + logger.Highlight(pathSecrets))
+	} else {
+		logger.Warn("Secrets directory doesn't exist. Creating: " + logger.Highlight(pathSecrets))
+		err := utils.MakeDirectory(pathSecrets)
+		if err != nil {
+			logger.Error("Failed to create directory: " + logger.Highlight(pathSecrets))
+		}
+	}
+
 	// Check if SSH directory exists
 	if utils.DirExists(pathSSH) {
-		logger.Info("Provider SSH directory exists: " + logger.Highlight(pathSSH) + ". Moving along...")
+		logger.Info("VPS SSH directory exists: " + logger.Highlight(pathSSH))
 	} else {
 		logger.Warn("Provider SSH directory doesn't exist. Creating - " + logger.Highlight(pathSSH))
 		err := utils.MakeDirectory(pathSSH)
@@ -86,13 +111,19 @@ func main() {
 		var password string
 		// Generate random password
 		password, err = utils.GenerateRandomPassword(30)
+		fmt.Println("Password should be below")
+		fmt.Println(password)
 		if err != nil {
 			logger.Error("Failed to generate random password for SSH keypair: " + err.Error())
 			return
 		}
 
 		// Write random password to disk
-		_ = os.WriteFile(pathSecrets+"sshkeysecret.txt", []byte(password+"\n"), 0600)
+		err = os.WriteFile(pathSecrets+"sshkeysecret.txt", []byte(password+"\n"), 0600)
+		if err != nil {
+			logger.Error("Failed to write SSH key password to file: " + logger.Highlight(pathSecrets+"sshkeysecret.txt"))
+			return
+		}
 
 		// Create keypair
 		_, err = keygen.New(privateKeyPath, keygen.WithKeyType(keygen.Ed25519), keygen.WithPassphrase(password), keygen.WithWrite())
@@ -197,7 +228,7 @@ func main() {
 
 		// Create Linode
 		logger.Info("Creating Linode...")
-		createResponse, err := providers.CreateLinode(providerKey, publicKeyPath, selectedImageSplit[0], selectedRegionSplit[0], selectedResourceSplit[0], rootPassword)
+		createResponse, err := providers.CreateLinode(providerKey, publicKeyPath, selectedImageSplit[0], selectedRegionSplit[0], selectedResourceSplit[0], rootPassword, instanceFile)
 		if err != nil {
 			logger.Error("Failed to create Linode: " + err.Error())
 		}
