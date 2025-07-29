@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"reflect"
 	"strconv"
 	"strings"
 
@@ -66,7 +65,7 @@ func GetLinodesBalance(providerKey string) (string, error) {
 				return "", logger.Errorf("Your Linode key is invalid or expired. Check it in the config.")
 			}
 
-			return "", logger.Errorf("Linode API error %s", reason)
+			return "", logger.Errorf("Linode API error: %s", reason)
 		}
 	}
 
@@ -275,7 +274,6 @@ func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, in
 
 	dataString := string(data)
 	dataStringStripped := strings.TrimSpace(dataString)
-	fmt.Println(dataStringStripped)
 
 	payload := LinodeCreateRequest{
 		Booted:         true,
@@ -332,9 +330,6 @@ func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, in
 		Region:        parsedResponseBytes.Region,
 		Type:          parsedResponseBytes.Type,
 	}
-
-	fmt.Printf("%v\n", parsedResponseBytes)
-	fmt.Println(reflect.TypeOf(parsedResponseBytes))
 
 	var allinstances InstancesToml
 
