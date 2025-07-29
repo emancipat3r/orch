@@ -249,7 +249,7 @@ type responseJSONBytes struct {
 	Type          string   `json:"type"`
 }
 
-type instance struct {
+type Instance struct {
 	Creation_Time string   `toml:"created"`
 	Host_UUID     string   `toml:"host_uuid"`
 	Id            int      `toml:"id"`
@@ -261,9 +261,7 @@ type instance struct {
 	Type          string   `toml:"type"`
 }
 
-type instances struct {
-	Instances map[string]instance `toml:"instance"`
-}
+type InstancesToml map[string]Instance
 
 func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, instanceFile string) (string, error) {
 	if providerKey == "" {
@@ -323,13 +321,7 @@ func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, in
 		return "", logger.Errorf("Unexpected status code: %s | %s", strconv.Itoa(response.StatusCode), string(responseBytes))
 	}
 
-	fmt.Printf("%v\n", parsedResponseBytes)
-	fmt.Println(reflect.TypeOf(parsedResponseBytes))
-
-	var allinstances instances
-	allinstances.Instances = make(map[string]instance)
-
-	VPS := instance{
+	VPS := Instance{
 		Creation_Time: parsedResponseBytes.Creation_Time,
 		Host_UUID:     parsedResponseBytes.Host_UUID,
 		Id:            parsedResponseBytes.Id,
@@ -341,9 +333,23 @@ func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, in
 		Type:          parsedResponseBytes.Type,
 	}
 
-	allinstances.Instances[VPS.Label] = VPS
+	fmt.Printf("%v\n", parsedResponseBytes)
+	fmt.Println(reflect.TypeOf(parsedResponseBytes))
 
-	logger.Info("Checking for instance file created")
+	var allinstances InstancesToml
+
+	if _, err := os.Stat(instanceFile); err == nil {
+		if _, err := toml.DecodeFile(instanceFile, &allinstances); err != nil {
+			logger.Error("Unable to load pre-existing instance file: " + logger.Highlight(instanceFile) + string(err.Error()))
+			return "", err
+		}
+	} else {
+		allinstances = make(InstancesToml)
+	}
+
+	allinstances[VPS.Label] = VPS
+
+	logger.Info("Writing new updated instance file")
 	f, err := os.Create(instanceFile)
 	if err != nil {
 		return "", err
@@ -361,5 +367,6 @@ func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, in
 		return "", err
 	}
 
-	return utils.PrettyPrintJSON(responseBytes), nil
+	// return utils.PrettyPrintJSON(responseBytes), nil
+	return "", nil
 }
