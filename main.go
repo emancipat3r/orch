@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/user"
 	"strings"
@@ -74,7 +73,7 @@ func main() {
 
 	// Check if SSH directory exists
 	if utils.DirExists(pathSSH) {
-		logger.Info("VPS SSH directory exists: " + logger.Highlight(pathSSH))
+		logger.Info("SSH directory exists: " + logger.Highlight(pathSSH))
 	} else {
 		logger.Warn("Provider SSH directory doesn't exist. Creating - " + logger.Highlight(pathSSH))
 		err := utils.MakeDirectory(pathSSH)
@@ -111,8 +110,6 @@ func main() {
 		var password string
 		// Generate random password
 		password, err = utils.GenerateRandomPassword(30)
-		fmt.Println("Password should be below")
-		fmt.Println(password)
 		if err != nil {
 			logger.Error("Failed to generate random password for SSH keypair: " + err.Error())
 			return
@@ -228,67 +225,10 @@ func main() {
 
 		// Create Linode
 		logger.Info("Creating Linode...")
-		createResponse, err := providers.CreateLinode(providerKey, publicKeyPath, selectedImageSplit[0], selectedRegionSplit[0], selectedResourceSplit[0], rootPassword, instanceFile)
+		_, err = providers.CreateLinode(providerKey, publicKeyPath, selectedImageSplit[0], selectedRegionSplit[0], selectedResourceSplit[0], rootPassword, instanceFile)
 		if err != nil {
 			logger.Error("Failed to create Linode: " + err.Error())
 		}
-		logger.Debug(logger.Highlight("Response:\n") + createResponse)
-
-		// Write json output to instance file
-		// Earlier list linodes
-		// Need sub command options if no options default to create linode if list or delete subcommand or choice list
-
-		/*
-			 {
-			  "alerts": {
-			    "cpu": 90,
-			    "io": 10000,
-			    "network_in": 10,
-			    "network_out": 10,
-			    "transfer_quota": 80
-			  },
-			  "backups": {
-			    "available": false,
-			    "enabled": false,
-			    "last_successful": null,
-			    "schedule": {
-			      "day": null,
-			      "window": null
-			    }
-			  },
-			  "capabilities": [],
-			  "created": "2025-07-18T02:56:19",
-			  "disk_encryption": "enabled",
-			  "group": "",
-			  "has_user_data": false,
-			  "host_uuid": "b2fa42934d38726a3bfae96212b57681f45b7eec",
-			  "hypervisor": "kvm",
-			  "id": 80368586,
-			  "image": "linode/almalinux8",
-			  "ipv4": [
-			    "194.195.116.217"
-			  ],
-			  "ipv6": "2400:8904::2000:a7ff:fee4:c178/128",
-			  "label": "linode80368586",
-			  "lke_cluster_id": null,
-			  "placement_group": null,
-			  "region": "ap-west",
-			  "site_type": "core",
-			  "specs": {
-			    "accelerated_devices": 0,
-			    "disk": 25600,
-			    "gpus": 0,
-			    "memory": 1024,
-			    "transfer": 1000,
-			    "vcpus": 1
-			  },
-			  "status": "provisioning",
-			  "tags": [],
-			  "type": "g6-nanode-1",
-			  "updated": "2025-07-18T02:56:19",
-			  "watchdog_enabled": true
-			}
-		*/
 
 	case "DigitalOcean":
 		logger.Info("Work in progress...")
