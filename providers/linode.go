@@ -344,24 +344,55 @@ func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, in
 
 	allinstances[VPS.Label] = VPS
 
-	logger.Info("Writing new updated instance file")
 	f, err := os.Create(instanceFile)
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
 
-	logger.Info("Encoding")
 	err = toml.NewEncoder(f).Encode(allinstances)
 	if err != nil {
 		return "", err
 	}
 
-	logger.Info("Wrote VPS creation instance file: " + logger.Highlight(instanceFile))
+	logger.Info("Updated VPS instance file: " + logger.Highlight(instanceFile))
 	if err != nil {
 		return "", err
 	}
 
-	// return utils.PrettyPrintJSON(responseBytes), nil
 	return "", nil
 }
+
+func listLinodes(providerKey string) (string, error) {
+	if providerKey == "" {
+		return "", logger.Errorf("Provider key is empty")
+	}
+
+	req, err := http.NewRequest("GET", "https://api.linode.com/v4/linode/instances?page_size=500", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+providerKey)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		fmt.Print(bodyBytes)
+		return nil, logger.Errorf("Unexpected status code: %d | %s", resp.StatusCode, string(bodyBytes))
+	}
+
+}
+
+/*
+curl --request GET \
+     --url 'https://api.linode.com/v4/linode/instances?page_size=500' \
+     --header 'accept: application/json' \
+     --header 'authorization: Bearer a'
+*/
