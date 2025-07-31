@@ -22,20 +22,23 @@ var (
 	configFile     string
 )
 
-// rootCmd is the base command fo the CLI
+// rootCmd is the base command for the CLI
 var rootCmd = &cobra.Command{
 	Use:   "vps",
 	Short: "VPS management CLI",
 	Long:  "A CLI tool for provisioning and managing VPS instances.",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		if cmd.Name() == "help" || cmd.Name() == "completion" {
-			return nil
-		}
-
+		// Always set path variables
 		user, err := user.Current()
 		if err != nil {
 			logger.Error("Failed to get current user: " + err.Error())
 			return err
+		}
+
+		// Skip all *other* checks for these commands
+		skipChecks := map[string]bool{"help": true, "completion": true, "list": true}
+		if skipChecks[cmd.Name()] {
+			return nil
 		}
 
 		pathConfig = user.HomeDir + "/.config/vps/config/"
