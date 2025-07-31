@@ -12,7 +12,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/emancipat3r/vps3/logger"
-
+	"github.com/emancipat3r/vps3/ui"
 	"github.com/emancipat3r/vps3/utils"
 )
 
@@ -363,14 +363,32 @@ func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, in
 	return "", nil
 }
 
-func listLinodes(providerKey string) (string, error) {
+type instanceJSONBytes struct {
+	Creation_Time string   `json:"created"`
+	Id            int      `json:"id"`
+	Host_Image    string   `json:"image"`
+	Ipv4          []string `json:"ipv4"`
+	Ipv6          string   `json:"ipv6"`
+	Region        string   `json:"region"`
+	Type          string   `json:"type"`
+	Status        string   `json:"status"`
+}
+
+type linodeListResponse struct {
+	Data    []instanceJSONBytes `json:"data"`
+	Page    int                 `json:"page"`
+	Pages   int                 `json:"pages"`
+	Results int                 `json:"results"`
+}
+
+func ListLinodeInstances(providerKey string) (string, error) {
 	if providerKey == "" {
 		return "", logger.Errorf("Provider key is empty")
 	}
 
 	req, err := http.NewRequest("GET", "https://api.linode.com/v4/linode/instances?page_size=500", nil)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+providerKey)
@@ -378,21 +396,42 @@ func listLinodes(providerKey string) (string, error) {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	defer resp.Body.Close()
+
+	responseBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	var parsedResponseBytes linodeListResponse
+	err = json.Unmarshal(responseBytes, &parsedResponseBytes)
+	if err != nil {
+		return "", err
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		fmt.Print(bodyBytes)
-		return nil, logger.Errorf("Unexpected status code: %d | %s", resp.StatusCode, string(bodyBytes))
+		return "", logger.Errorf("Unexpected status code: %d | %s", resp.StatusCode, string(bodyBytes))
 	}
 
-}
+	var rows [][]string
+	for _, inst := range parsedResponseBytes.Data {
+		rows = append(rows, []string{
+			fmt.Sprintf("%d", inst.Id),
+			fmt.Sprintf("%v", inst.Ipv4[0]),
+			inst.Region,
+			inst.Host_Image,
+			inst.Type,
+			inst.Creation_Time,
+			inst.Status,
+		})
+	}
 
-/*
-curl --request GET \
-     --url 'https://api.linode.com/v4/linode/instances?page_size=500' \
-     --header 'accept: application/json' \
-     --header 'authorization: Bearer a'
-*/
+	fmt.Println(ui.InstanceTable(rows))
+
+	return "", nil
+
+}
