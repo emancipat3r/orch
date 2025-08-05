@@ -37,7 +37,7 @@ var listCmd = &cobra.Command{
 
 			logger.Info("Linode account balance: " + logger.Highlight("$"+accountBalance))
 
-			providers.ListLinodeInstances(providerKey)
+			providers.ListLinodeInstancesTable(providerKey)
 
 		case "DigitalOcean":
 			logger.Info("Work in progress...")
