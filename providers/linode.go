@@ -381,7 +381,7 @@ type linodeListResponse struct {
 	Results int                 `json:"results"`
 }
 
-func ListLinodeInstances(providerKey string) (string, error) {
+func ListLinodeInstancesTable(providerKey string) (string, error) {
 	if providerKey == "" {
 		return "", logger.Errorf("Provider key is empty")
 	}
@@ -431,6 +431,92 @@ func ListLinodeInstances(providerKey string) (string, error) {
 	}
 
 	fmt.Println(ui.InstanceTable(rows))
+
+	return "", nil
+
+}
+
+type Instances struct {
+	Creation_Time string   `json:"created"`
+	Id            int      `json:"id"`
+	Host_Image    string   `json:"image"`
+	Ipv4          []string `json:"ipv4"`
+	Ipv6          string   `json:"ipv6"`
+	Region        string   `json:"region"`
+}
+
+type InstancesResponse struct {
+	Data []Instances `json:"data"`
+}
+
+func SelectLinodeInstance(providerKey string) ([]Instances, error) {
+	if providerKey == "" {
+		return nil, logger.Errorf("Provider key is empty")
+	}
+
+	req, err := http.NewRequest("GET", "https://api.linode.com/v4/linode/instances?page_size=500", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+providerKey)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		fmt.Print(bodyBytes)
+		return nil, logger.Errorf("Unexpected status code: %d | %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var instancesResp InstancesResponse
+	err = json.NewDecoder(resp.Body).Decode(&instancesResp)
+	if err != nil {
+		return nil, err
+	}
+
+	return instancesResp.Data, nil
+
+}
+
+/*
+import requests
+
+url = "https://api.linode.com/v4/linode/instances/234"
+
+headers = {
+    "accept": "application/json",
+    "authorization": "Bearer a"
+}
+
+response = requests.delete(url, headers=headers)
+
+print(response.text)
+*/
+
+func DestroyLinode(providerKey, instanceID string) (string, error) {
+	if providerKey == "" {
+		return "", logger.Errorf("Provider key is empty")
+	}
+
+	req, err := http.NewRequest("DELETE", "https://api.linode.com/v4/linode/instances/"+instanceID, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+providerKey)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
 
 	return "", nil
 

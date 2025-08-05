@@ -36,7 +36,7 @@ var rootCmd = &cobra.Command{
 		}
 
 		// Skip all *other* checks for these commands
-		skipChecks := map[string]bool{"help": true, "completion": true, "list": true}
+		skipChecks := map[string]bool{"help": true, "completion": true, "list": true, "destroy": true}
 		if skipChecks[cmd.Name()] {
 			return nil
 		}
