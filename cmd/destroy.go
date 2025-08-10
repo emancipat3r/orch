@@ -28,6 +28,8 @@ var destroyCmd = &cobra.Command{
 
 			pathConfig = user.HomeDir + "/.config/vps/config/"
 			configFile = pathConfig + "configuration.toml"
+			pathInstances = user.HomeDir + "/.config/vps/instances/"
+			instanceFile = pathInstances + "instances.toml"
 
 			providerKey := providers.GetLinodeAPIKey(configFile, provider)
 
@@ -65,7 +67,7 @@ var destroyCmd = &cobra.Command{
 
 			logger.Info("Destroying Linode: " + logger.Highlight(selectedInstanceSplit[2]))
 
-			providers.DestroyLinode(providerKey, selectedInstanceSplit[2])
+			providers.DestroyLinode(providerKey, selectedInstanceSplit[2], instanceFile)
 
 			if err != nil {
 				logger.Error("Failed to destroy Linode: " + err.Error())

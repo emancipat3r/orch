@@ -249,15 +249,15 @@ type responseJSONBytes struct {
 }
 
 type Instance struct {
-	Creation_Time string   `toml:"created"`
-	Host_UUID     string   `toml:"host_uuid"`
-	Id            int      `toml:"id"`
-	Host_Image    string   `toml:"image"`
-	Ipv4          []string `toml:"ipv4"`
-	Ipv6          string   `toml:"ipv6"`
-	Label         string   `toml:"label"`
-	Region        string   `toml:"region"`
-	Type          string   `toml:"type"`
+	Creation_Time string `toml:"created"`
+	Host_UUID     string `toml:"host_uuid"`
+	Id            int    `toml:"id"`
+	Host_Image    string `toml:"image"`
+	Ipv4          string `toml:"ipv4"`
+	Ipv6          string `toml:"ipv6"`
+	Label         string `toml:"label"`
+	Region        string `toml:"region"`
+	Type          string `toml:"type"`
 }
 
 type InstancesToml map[string]Instance
@@ -324,7 +324,7 @@ func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, in
 		Host_UUID:     parsedResponseBytes.Host_UUID,
 		Id:            parsedResponseBytes.Id,
 		Host_Image:    parsedResponseBytes.Host_Image,
-		Ipv4:          parsedResponseBytes.Ipv4,
+		Ipv4:          parsedResponseBytes.Ipv4[0],
 		Ipv6:          parsedResponseBytes.Ipv6,
 		Label:         parsedResponseBytes.Label,
 		Region:        parsedResponseBytes.Region,
@@ -342,7 +342,8 @@ func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, in
 		allinstances = make(InstancesToml)
 	}
 
-	allinstances[VPS.Label] = VPS
+	vpsIDStr := strconv.Itoa(VPS.Id)
+	allinstances[vpsIDStr] = VPS
 
 	f, err := os.Create(instanceFile)
 	if err != nil {
@@ -484,22 +485,51 @@ func SelectLinodeInstance(providerKey string) ([]Instances, error) {
 
 }
 
-/*
-import requests
+// Delete by table name (your table header equals the instance ID string)
+func DeleteByTableName(instanceFile string, instanceID ...string) error {
+	// Load instanceFile
+	var m InstancesToml
 
-url = "https://api.linode.com/v4/linode/instances/234"
+	if _, err := os.Stat(instanceFile); err != nil {
+		return logger.Errorf("Cannot load instances file, not found: %s", instanceFile)
+	}
 
-headers = {
-    "accept": "application/json",
-    "authorization": "Bearer a"
+	if _, err := toml.DecodeFile(instanceFile, &m); err != nil {
+		return logger.Errorf("decode toml: %w", err)
+	}
+
+	if m == nil {
+		return nil
+	}
+
+	// Delete tables associated with instanceIDs
+	for _, ID := range instanceID {
+		delete(m, ID)
+	}
+
+	// Write atomically (tmp + rename)
+	tmp := instanceFile + ".tmp"
+	f, err := os.Create(tmp)
+
+	if err != nil {
+		return logger.Errorf("Failed creating tmp instance file: %w", err)
+	}
+
+	if err := toml.NewEncoder(f).Encode(m); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return logger.Errorf("Failed updating instance file: %w", err)
+	}
+
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("Failed to close tmp instance file: %w", err)
+	}
+
+	return os.Rename(tmp, instanceFile)
 }
 
-response = requests.delete(url, headers=headers)
-
-print(response.text)
-*/
-
-func DestroyLinode(providerKey, instanceID string) (string, error) {
+func DestroyLinode(providerKey, instanceID, instanceFile string) (string, error) {
 	if providerKey == "" {
 		return "", logger.Errorf("Provider key is empty")
 	}
@@ -517,6 +547,15 @@ func DestroyLinode(providerKey, instanceID string) (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
+
+	logger.Success("Deleted Linode instance: " + logger.Highlight(instanceID))
+
+	// remove instanceID table in instance toml file
+	err = DeleteByTableName(instanceFile, instanceID)
+
+	if err != nil {
+		return "", logger.Errorf("Failed to update the instanceFile: %s", instanceFile)
+	}
 
 	return "", nil
 
