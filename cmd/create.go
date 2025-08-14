@@ -16,10 +16,10 @@ var createCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		provider := ui.ChoiceProvider()
 		logger.Info("You selected: " + logger.Highlight(provider))
-		providerKey := providers.GetLinodeAPIKey(configFile, provider)
 
 		switch provider {
 		case "Linode":
+			providerKey := providers.GetLinodeAPIKey(configFile, provider)
 			accountBalance, err := providers.GetLinodesBalance(providerKey)
 
 			if err != nil {
@@ -103,7 +103,8 @@ var createCmd = &cobra.Command{
 			}
 
 		case "DigitalOcean":
-			logger.Info("Work in progress...")
+			providerKey := providers.GetLinodeAPIKey(configFile, provider)
+			logger.Info("PAT: " + logger.Highlight(providerKey))
 		case "Vultr":
 			logger.Info("Work in progress...")
 		default:
