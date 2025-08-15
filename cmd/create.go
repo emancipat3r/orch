@@ -104,7 +104,15 @@ var createCmd = &cobra.Command{
 
 		case "DigitalOcean":
 			providerKey := providers.GetLinodeAPIKey(configFile, provider)
-			logger.Info("PAT: " + logger.Highlight(providerKey))
+			accountBalance, err := providers.GetDOBalance(providerKey)
+
+			if err != nil {
+				logger.Error("Failed to get DigitalOcean account balance: " + err.Error())
+				return
+			}
+
+			logger.Info("DigitalOcean account balance: " + logger.Highlight("$"+accountBalance))
+
 		case "Vultr":
 			logger.Info("Work in progress...")
 		default:

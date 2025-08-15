@@ -26,7 +26,7 @@ func GetLinodeAPIKey(configFile string, provider string) string {
 	return providerKey
 }
 
-type Account struct {
+type LinodeAccount struct {
 	Balance           float64 `json:"balance"`
 	BalanceUninvoiced float64 `json:"balance_uninvoiced"`
 }
@@ -69,7 +69,7 @@ func GetLinodesBalance(providerKey string) (string, error) {
 		}
 	}
 
-	var account Account
+	var account LinodeAccount
 	err = json.Unmarshal(bodyBytes, &account)
 	if err != nil {
 		return "", err
