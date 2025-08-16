@@ -113,6 +113,18 @@ var createCmd = &cobra.Command{
 
 			logger.Info("DigitalOcean account balance: " + logger.Highlight("$"+accountBalance))
 
+			regions, err := providers.GetDORegions(providerKey)
+
+			var regionOptions []string
+
+			for _, region := range regions {
+				regionOptions = append(regionOptions, region.Slug+" - "+region.Name)
+			}
+
+			selectedRegion := ui.Select("Select your region:", regionOptions)
+			logger.Info("You selected region: " + logger.Highlight(selectedRegion))
+			//selectedRegionSplit := strings.Split(selectedRegion, " ")
+
 		case "Vultr":
 			logger.Info("Work in progress...")
 		default:

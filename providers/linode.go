@@ -110,7 +110,7 @@ func ListLinodes(providerKey string) (string, error) {
 	return formattedResponse, nil
 }
 
-type Region struct {
+type LinodeRegion struct {
 	ID      string `json:"id"`
 	Country string `json:"country"`
 	Label   string `json:"label"`
@@ -118,10 +118,10 @@ type Region struct {
 }
 
 type RegionsResponse struct {
-	Data []Region `json:"data"`
+	Data []LinodeRegion `json:"data"`
 }
 
-func GetLinodeRegions() ([]Region, error) {
+func GetLinodeRegions() ([]LinodeRegion, error) {
 	req, err := http.NewRequest("GET", "https://api.linode.com/v4/regions", nil)
 	if err != nil {
 		return nil, err

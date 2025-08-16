@@ -71,3 +71,46 @@ func GetDOBalance(providerKey string) (string, error) {
 	return fmt.Sprintf("%s", account.Balance), nil
 
 }
+
+type DORegion struct {
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+}
+
+type DORegionsResponse struct {
+	Data []DORegion `json:"regions"`
+}
+
+func GetDORegions(providerKey string) ([]DORegion, error) {
+	if providerKey == "" {
+		return nil, logger.Errorf("Provider key is empty")
+	}
+
+	req, err := http.NewRequest("GET", "https://api.digitalocean.com/v2/regions", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+providerKey)
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		fmt.Print(bodyBytes)
+		return nil, logger.Errorf("Unexpected status code: %d | %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var regionsResp DORegionsResponse
+	err = json.NewDecoder(resp.Body).Decode(&regionsResp)
+	if err != nil {
+		return nil, err
+	}
+
+	return regionsResp.Data, nil
+}
