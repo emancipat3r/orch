@@ -123,7 +123,76 @@ var createCmd = &cobra.Command{
 
 			selectedRegion := ui.Select("Select your region:", regionOptions)
 			logger.Info("You selected region: " + logger.Highlight(selectedRegion))
-			//selectedRegionSplit := strings.Split(selectedRegion, " ")
+			selectedRegionSplit := strings.Split(selectedRegion, " ")
+
+			images, err := providers.GetDOImages(providerKey)
+			if err != nil {
+				logger.Error("Failed to hit endpoint: " + err.Error())
+				return
+			}
+
+			var imageOptions []string
+
+			for _, image := range images {
+				imageOptions = append(imageOptions, image.Slug+" - "+image.Name)
+			}
+
+			selectedImage := ui.Select("Select your image:", imageOptions)
+			logger.Info("You selected image: " + logger.Highlight(selectedImage))
+			selectedImageSplit := strings.Split(selectedImage, " ")
+
+			resources, err := providers.GetDOResources(providerKey)
+			if err != nil {
+				logger.Error("Failed to hit endpoint: " + err.Error())
+				return
+			}
+
+			var resourceOptions []string
+
+			for _, resource := range resources {
+				resourceOptions = append(resourceOptions, resource.Slug+" - "+resource.Name)
+			}
+
+			selectedResource := ui.Select("Select your resourcing:", resourceOptions)
+			logger.Info("You selected type: " + logger.Highlight(selectedResource))
+			selectedResourceSplit := strings.Split(selectedResource, " ")
+
+			rootPassword, err := utils.GenerateRandomPassword(30)
+
+			if err != nil {
+				logger.Error("Failed to generate root password for Linode: " + err.Error())
+				return
+			}
+
+			/*
+				curl -X POST \
+				  -H "Content-Type: application/json" \
+				  -H "Authorization: Bearer key" \
+				  -d '{"name":"example.com","region":"nyc3","size":"s-1vcpu-1gb","image":"ubuntu-20-04-x64","ssh_keys":[289794,"3b:16:e4:bf:8b:00:8b:b8:59:8c:a9:d3:f0:19:fa:45"]"}' \
+				  "https://api.digitalocean.com/v2/droplets"
+
+				'{
+					"name":"example.com",
+					"region":"nyc3",
+					"size":"s-1vcpu-1gb",
+					"image":"ubuntu-20-04-x64",
+					"ssh_keys":[289794,"3b:16:e4:bf:8b:00:8b:b8:59:8c:a9:d3:f0:19:fa:45"]"
+			*/
+
+			logger.Info("Creating Droplet...")
+			_, err = providers.CreateDroplet(
+				providerKey,
+				publicKeyPath,
+				selectedImageSplit[0],
+				selectedRegionSplit[0],
+				selectedResourceSplit[0],
+				rootPassword,
+				instanceFile,
+			)
+
+			if err != nil {
+				logger.Error("Failed to create Droplet: " + err.Error())
+			}
 
 		case "Vultr":
 			logger.Info("Work in progress...")
