@@ -150,16 +150,16 @@ func GetLinodeRegions() ([]LinodeRegion, error) {
 	return regionsResp.Data, nil
 }
 
-type Image struct {
+type LinodeImage struct {
 	Label string `json:"label"`
 	ID    string `json:"id"`
 }
 
-type ImagesResponse struct {
-	Data []Image `json:"data"`
+type LinodeImagesResponse struct {
+	Data []LinodeImage `json:"data"`
 }
 
-func GetLinodeImages() ([]Image, error) {
+func GetLinodeImages() ([]LinodeImage, error) {
 	req, err := http.NewRequest("GET", "https://api.linode.com/v4/images?page=1&page_size=100", nil)
 	if err != nil {
 		return nil, err
@@ -179,7 +179,7 @@ func GetLinodeImages() ([]Image, error) {
 		return nil, logger.Errorf("Unexpected status code: %d | %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	var imagesResp ImagesResponse
+	var imagesResp LinodeImagesResponse
 	err = json.NewDecoder(resp.Body).Decode(&imagesResp)
 	if err != nil {
 		return nil, err
@@ -188,16 +188,16 @@ func GetLinodeImages() ([]Image, error) {
 	return imagesResp.Data, nil
 }
 
-type Resource struct {
+type LinodeResource struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
 }
 
-type ResourcesResponse struct {
-	Data []Resource `json:"data"`
+type LinodeResourcesResponse struct {
+	Data []LinodeResource `json:"data"`
 }
 
-func GetLinodeResources() ([]Resource, error) {
+func GetLinodeResources() ([]LinodeResource, error) {
 	req, err := http.NewRequest("GET", "https://api.linode.com/v4/linode/types", nil)
 	if err != nil {
 		return nil, err
@@ -217,7 +217,7 @@ func GetLinodeResources() ([]Resource, error) {
 		return nil, logger.Errorf("Unexpected status code: %d | %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	var resourcesResp ResourcesResponse
+	var resourcesResp LinodeResourcesResponse
 	err = json.NewDecoder(resp.Body).Decode(&resourcesResp)
 	if err != nil {
 		return nil, err
@@ -236,7 +236,7 @@ type LinodeCreateRequest struct {
 	RootPass       string   `json:"root_pass"`
 }
 
-type responseJSONBytes struct {
+type linodeResponseJSONBytes struct {
 	Creation_Time string   `json:"created"`
 	Host_UUID     string   `json:"host_uuid"`
 	Id            int      `json:"id"`
@@ -248,7 +248,7 @@ type responseJSONBytes struct {
 	Type          string   `json:"type"`
 }
 
-type Instance struct {
+type LinodeInstance struct {
 	Creation_Time string `toml:"created"`
 	Host_UUID     string `toml:"host_uuid"`
 	Id            int    `toml:"id"`
@@ -260,7 +260,7 @@ type Instance struct {
 	Type          string `toml:"type"`
 }
 
-type InstancesToml map[string]Instance
+type LinodeInstancesToml map[string]LinodeInstance
 
 func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, instanceFile string) (string, error) {
 	if providerKey == "" {
@@ -309,7 +309,7 @@ func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, in
 		return "", err
 	}
 
-	var parsedResponseBytes responseJSONBytes
+	var parsedResponseBytes linodeResponseJSONBytes
 	err = json.Unmarshal(responseBytes, &parsedResponseBytes)
 	if err != nil {
 		return "", err
@@ -319,7 +319,7 @@ func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, in
 		return "", logger.Errorf("Unexpected status code: %s | %s", strconv.Itoa(response.StatusCode), string(responseBytes))
 	}
 
-	VPS := Instance{
+	VPS := LinodeInstance{
 		Creation_Time: parsedResponseBytes.Creation_Time,
 		Host_UUID:     parsedResponseBytes.Host_UUID,
 		Id:            parsedResponseBytes.Id,
@@ -331,7 +331,7 @@ func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, in
 		Type:          parsedResponseBytes.Type,
 	}
 
-	var allinstances InstancesToml
+	var allinstances LinodeInstancesToml
 
 	if _, err := os.Stat(instanceFile); err == nil {
 		if _, err := toml.DecodeFile(instanceFile, &allinstances); err != nil {
@@ -339,7 +339,7 @@ func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, in
 			return "", err
 		}
 	} else {
-		allinstances = make(InstancesToml)
+		allinstances = make(LinodeInstancesToml)
 	}
 
 	vpsIDStr := strconv.Itoa(VPS.Id)
