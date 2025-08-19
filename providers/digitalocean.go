@@ -318,10 +318,14 @@ func CreateDroplet(providerKey, pubKeyPath, image, region, resource, rootPass, i
 	}
 	defer response.Body.Close()
 
+	logger.Debug(response.Body)
+
 	responseBytes, err := io.ReadAll(response.Body)
 	if err != nil {
 		return "", err
 	}
+
+	logger.Debug(string(responseBytes))
 
 	var parsedResponseBytes DOresponseJSONBytes
 	err = json.Unmarshal(responseBytes, &parsedResponseBytes)
