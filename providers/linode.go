@@ -488,7 +488,7 @@ func SelectLinodeInstance(providerKey string) ([]Instances, error) {
 // Delete by table name (your table header equals the instance ID string)
 func DeleteByTableName(instanceFile string, instanceID ...string) error {
 	// Load instanceFile
-	var m InstancesToml
+	var m LinodeInstancesToml
 
 	if _, err := os.Stat(instanceFile); err != nil {
 		return logger.Errorf("Cannot load instances file, not found: %s", instanceFile)
