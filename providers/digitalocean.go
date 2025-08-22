@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/emancipat3r/vps3/logger"
@@ -235,14 +237,20 @@ func GetDOResources(providerKey string) ([]DOResource, error) {
 	return resourcesResp.Data, nil
 }
 
+// 8 number UID
+func CreateInstanceUID() int {
+	rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	num := rand.Intn(90000000) + 10000000 // always 8 digits
+	return num
+}
+
 type DOCreateRequest struct {
-	Booted         bool     `json:"booted"`
-	SwapSize       int      `json:"swap_size"`
-	AuthorizedKeys []string `json:"authorized_keys"`
-	Image          string   `json:"image"`
-	Region         string   `json:"region"`
-	Type           string   `json:"type"`
-	RootPass       string   `json:"root_pass"`
+	SSHKeys  []string `json:"ssh_keys"`
+	Image    string   `json:"image"`
+	Region   string   `json:"region"`
+	Type     string   `json:"type"`
+	RootPass string   `json:"root_pass"`
 }
 
 type DOresponseJSONBytes struct {
@@ -284,11 +292,14 @@ func CreateDroplet(providerKey, pubKeyPath, image, region, resource, rootPass, i
 	dataString := string(data)
 	dataStringStripped := strings.TrimSpace(dataString)
 
+	UID := CreateInstanceUID()
+
 	payload := DOCreateRequest{
-		Region:         region,
-		Image:          image,
-		Type:           resource,
-		AuthorizedKeys: []string{dataStringStripped},
+		Name:    UID,
+		Region:  region,
+		Image:   image,
+		Type:    resource,
+		SSHKeys: []string{dataStringStripped},
 	}
 
 	jsonBody, err := json.Marshal(payload)
@@ -304,7 +315,7 @@ func CreateDroplet(providerKey, pubKeyPath, image, region, resource, rootPass, i
 		"ssh_keys":[289794,"3b:16:e4:bf:8b:00:8b:b8:59:8c:a9:d3:f0:19:fa:45"]"
 	*/
 
-	request, err := http.NewRequest("POST", "https://api.digitalocean.com/v2/droplet", bytes.NewBuffer(jsonBody))
+	request, err := http.NewRequest("POST", "https://api.digitalocean.com/v2/droplets", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return "", err
 	}
@@ -317,8 +328,6 @@ func CreateDroplet(providerKey, pubKeyPath, image, region, resource, rootPass, i
 		return "", err
 	}
 	defer response.Body.Close()
-
-	logger.Debug(response.Body)
 
 	responseBytes, err := io.ReadAll(response.Body)
 	if err != nil {
