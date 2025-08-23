@@ -238,14 +238,16 @@ func GetDOResources(providerKey string) ([]DOResource, error) {
 }
 
 // 8 number UID
-func CreateInstanceUID() int {
+func CreateInstanceUID() string {
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	num := rand.Intn(90000000) + 10000000 // always 8 digits
-	return num
+	numStr := strconv.Itoa(num)
+	return numStr
 }
 
 type DOCreateRequest struct {
+	Name     string   `json:"name"`
 	SSHKeys  []string `json:"ssh_keys"`
 	Image    string   `json:"image"`
 	Region   string   `json:"region"`
@@ -256,7 +258,7 @@ type DOCreateRequest struct {
 type DOresponseJSONBytes struct {
 	Creation_Time string   `json:"created"`
 	Host_UUID     string   `json:"host_uuid"`
-	Id            int      `json:"id"`
+	Name          int      `json:"name"`
 	Host_Image    string   `json:"image"`
 	Ipv4          []string `json:"ipv4"`
 	Ipv6          string   `json:"ipv6"`
@@ -279,7 +281,7 @@ type DOInstance struct {
 
 type DOInstancesToml map[string]DOInstance
 
-func CreateDroplet(providerKey, pubKeyPath, image, region, resource, rootPass, instanceFile string) (string, error) {
+func CreateDroplet(providerKey, pubKeyPath, image, region, resource, instanceFile string) (string, error) {
 	if providerKey == "" {
 		return "", logger.Errorf("Provider key is empty")
 	}
@@ -306,14 +308,6 @@ func CreateDroplet(providerKey, pubKeyPath, image, region, resource, rootPass, i
 	if err != nil {
 		logger.Errorf("Failed to marshal request payload: %v", err)
 	}
-
-	/*
-		"name":"example.com",
-		"region":"nyc3",
-		"size":"s-1vcpu-1gb",
-		"image":"ubuntu-20-04-x64",
-		"ssh_keys":[289794,"3b:16:e4:bf:8b:00:8b:b8:59:8c:a9:d3:f0:19:fa:45"]"
-	*/
 
 	request, err := http.NewRequest("POST", "https://api.digitalocean.com/v2/droplets", bytes.NewBuffer(jsonBody))
 	if err != nil {
@@ -349,7 +343,7 @@ func CreateDroplet(providerKey, pubKeyPath, image, region, resource, rootPass, i
 	VPS := DOInstance{
 		Creation_Time: parsedResponseBytes.Creation_Time,
 		Host_UUID:     parsedResponseBytes.Host_UUID,
-		Id:            parsedResponseBytes.Id,
+		Id:            parsedResponseBytes.Name,
 		Host_Image:    parsedResponseBytes.Host_Image,
 		Ipv4:          parsedResponseBytes.Ipv4[0],
 		Ipv6:          parsedResponseBytes.Ipv6,
