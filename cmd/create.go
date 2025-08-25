@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/emancipat3r/vps3/logger"
@@ -103,7 +104,7 @@ var createCmd = &cobra.Command{
 			}
 
 		case "DigitalOcean":
-			providerKey := providers.GetLinodeAPIKey(configFile, provider)
+			providerKey := providers.GetDOAPIKey(configFile, provider)
 			accountBalance, err := providers.GetDOBalance(providerKey)
 
 			if err != nil {
@@ -157,10 +158,29 @@ var createCmd = &cobra.Command{
 			logger.Info("You selected type: " + logger.Highlight(selectedResource))
 			selectedResourceSplit := strings.Split(selectedResource, " ")
 
+			logger.Info(providers.CreateInstanceUID())
+			logger.Info(providers.CreateInstanceUID())
+			logger.Info(providers.CreateInstanceUID())
+			logger.Info(providers.CreateInstanceUID())
+			logger.Info(providers.CreateInstanceUID())
+			logger.Info(providers.CreateInstanceUID())
+			logger.Info(providers.CreateInstanceUID())
+			logger.Info(providers.CreateInstanceUID())
+			logger.Info(providers.CreateInstanceUID())
+
+			logger.Info("Uploading SSH key to Digital Ocean")
+
+			SSHKeyID, err := providers.UploadDOSSHKey(providerKey, publicKeyPath)
+			if err != nil {
+				logger.Error("Failed upload SSH key to Digital Ocean: " + err.Error())
+				return
+			}
+			logger.Info("Uploaded SSH key to Digital Ocean. ID: " + logger.Highlight(strconv.Itoa(SSHKeyID)))
+
 			logger.Info("Creating Droplet...")
 			_, err = providers.CreateDroplet(
 				providerKey,
-				publicKeyPath,
+				strconv.Itoa(SSHKeyID),
 				selectedImageSplit[0],
 				selectedRegionSplit[0],
 				selectedResourceSplit[0],
