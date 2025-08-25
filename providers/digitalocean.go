@@ -246,13 +246,103 @@ func CreateInstanceUID() string {
 	return numStr
 }
 
+func UploadDOSSHKey(providerKey, pubKeyPath string) (int, error) {
+	if providerKey == "" {
+		return 0, logger.Errorf("Provider key is empty")
+	}
+
+	data, err := os.ReadFile(pubKeyPath)
+	if err != nil {
+		return 0, err
+	}
+	pubKey := strings.TrimSpace(string(data))
+
+	keyName := CreateInstanceUID()
+
+	// Request payload
+	payload := map[string]string{
+		"name":       keyName,
+		"public_key": pubKey,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return 0, err
+	}
+
+	req, err := http.NewRequest("POST", "https://api.digitalocean.com/v2/account/keys", bytes.NewBuffer(body))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+providerKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == http.StatusCreated {
+
+		var parsed struct {
+			SSHKey struct {
+				ID int `json:"id"`
+			} `json:"ssh_key"`
+		}
+
+		if err := json.Unmarshal(respBody, &parsed); err != nil {
+			return 0, err
+		}
+
+		logger.Info("Uploaded SSH Key to DigitalOcean. ID: " + logger.Highlight(strconv.Itoa(parsed.SSHKey.ID)))
+		return parsed.SSHKey.ID, nil
+	}
+
+	if resp.StatusCode == http.StatusUnprocessableEntity {
+
+		req2, _ := http.NewRequest("GET", "https://api.digitalocean.com/v2/account/keys", nil)
+		req2.Header.Set("Authorization", "Bearer "+providerKey)
+		req2.Header.Set("Accept", "application/json")
+
+		resp2, err := client.Do(req2)
+
+		if err != nil {
+			return 0, err
+		}
+		defer resp2.Body.Close()
+
+		body2, _ := io.ReadAll(resp2.Body)
+		var parsed struct {
+			Keys []struct {
+				ID        int    `json:"id"`
+				PublicKey string `json:"public_key"`
+			} `json:"ssh_keys"`
+		}
+
+		if err := json.Unmarshal(body2, &parsed); err != nil {
+			return 0, err
+		}
+
+		for _, k := range parsed.Keys {
+			if strings.TrimSpace(k.PublicKey) == pubKey {
+				return k.ID, nil
+			}
+		}
+	}
+
+	return 0, logger.Errorf("Failed to upload SSH key: status=%d body=%s", resp.StatusCode, string(respBody))
+}
+
 type DOCreateRequest struct {
-	Name     string   `json:"name"`
-	SSHKeys  []string `json:"ssh_keys"`
-	Image    string   `json:"image"`
-	Region   string   `json:"region"`
-	Type     string   `json:"type"`
-	RootPass string   `json:"root_pass"`
+	Name    string   `json:"name"`
+	SSHKeys []string `json:"ssh_keys"`
+	Image   string   `json:"image"`
+	Region  string   `json:"region"`
+	Size    string   `json:"size"`
 }
 
 type DOresponseJSONBytes struct {
@@ -281,12 +371,12 @@ type DOInstance struct {
 
 type DOInstancesToml map[string]DOInstance
 
-func CreateDroplet(providerKey, pubKeyPath, image, region, resource, instanceFile string) (string, error) {
+func CreateDroplet(providerKey, pubKeyID, image, region, resource, instanceFile string) (string, error) {
 	if providerKey == "" {
 		return "", logger.Errorf("Provider key is empty")
 	}
 
-	data, err := os.ReadFile(pubKeyPath)
+	data, err := os.ReadFile(pubKeyID)
 	if err != nil {
 		return "", err
 	}
@@ -300,7 +390,7 @@ func CreateDroplet(providerKey, pubKeyPath, image, region, resource, instanceFil
 		Name:    UID,
 		Region:  region,
 		Image:   image,
-		Type:    resource,
+		Size:    resource,
 		SSHKeys: []string{dataStringStripped},
 	}
 
@@ -384,3 +474,142 @@ func CreateDroplet(providerKey, pubKeyPath, image, region, resource, instanceFil
 
 	return "", nil
 }
+
+/*
+{
+	"droplet": {
+		"id": 3164444,
+		"name": "example.com",
+		"memory": 1024,
+		"vcpus": 1,
+		"disk": 25,
+		"disk_info": [
+			{
+				"type": "local",
+				"size": {
+					"amount": 25,
+					"unit": "gib"
+				}
+			}
+		],
+		"locked": false,
+		"status": "new",
+		"kernel": null,
+		"created_at": "2020-07-21T18:37:44Z",
+		"features": [
+			"backups",
+			"private_networking",
+			"ipv6",
+			"monitoring"
+		],
+		"backup_ids": [ ],
+		"next_backup_window": null,
+		"snapshot_ids": [ ],
+		"image": {
+		"id": 63663980,
+		"name": "20.04 (LTS) x64",
+		"distribution": "Ubuntu",
+		"slug": "ubuntu-20-04-x64",
+		"public": true,
+		"regions": [
+			"ams2",
+			"ams3",
+			"blr1",
+			"fra1",
+			"lon1",
+			"nyc1",
+			"nyc2",
+			"nyc3",
+			"sfo1",
+			"sfo2",
+			"sfo3",
+			"sgp1",
+			"tor1"
+		],
+		"created_at": "2020-05-15T05:47:50Z",
+		"type": "snapshot",
+		"min_disk_size": 20,
+		"size_gigabytes": 2.36,
+		"description": "",
+		"tags": [ ],
+		"status": "available",
+		"error_message": ""
+	},
+	"volume_ids": [ ],
+	"size":
+	{
+	"slug": "s-1vcpu-1gb",
+	"memory": 1024,
+	"vcpus": 1,
+	"disk": 25,
+	"transfer": 1,
+	"price_monthly": 5,
+	"price_hourly": 0.00743999984115362,
+	"regions": [
+		"ams2",
+		"ams3",
+		"blr1",
+		"fra1",
+		"lon1",
+		"nyc1",
+		"nyc2",
+		"nyc3",
+		"sfo1",
+		"sfo2",
+		"sfo3",
+		"sgp1",
+		"tor1"
+	],
+	"available": true,
+	"description": "Basic"
+	},
+	"size_slug": "s-1vcpu-1gb",
+	"networks": {
+		"v4": [ ],
+		"v6": [ ]
+	},
+	"region": {
+		"name": "New York 3",
+		"slug": "nyc3",
+		"features": [
+			"private_networking",
+			"backups",
+			"ipv6",
+			"metadata",
+			"install_agent",
+			"storage",
+			"image_transfer"
+		],
+		"available": true,
+		"sizes": [
+			"s-1vcpu-1gb",
+			"s-1vcpu-2gb",
+			"s-1vcpu-3gb",
+			"s-2vcpu-2gb",
+			"s-3vcpu-1gb",
+			"s-2vcpu-4gb",
+			"s-4vcpu-8gb",
+			"s-6vcpu-16gb",
+			"s-8vcpu-32gb",
+			"s-12vcpu-48gb",
+			"s-16vcpu-64gb",
+			"s-20vcpu-96gb",
+			"s-24vcpu-128gb",
+			"s-32vcpu-192g"
+		]
+	},
+	"tags": [
+		"web",
+		"env:prod"
+	]
+	},
+	"links": {
+		"actions": [{
+			"id": 7515,
+			"rel": "create",
+			"href": "https://api.digitalocean.com/v2/actions/7515"
+		}
+		]
+	}
+}
+*/
