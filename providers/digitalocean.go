@@ -122,43 +122,6 @@ func GetDORegions(providerKey string) ([]DORegion, error) {
 	return regionsResp.Data, nil
 }
 
-/*
-{
-  "images": [
-    {
-      "id": 135125666,
-      "name": "9 Stream x64",
-      "distribution": "CentOS",
-      "slug": "centos-stream-9-x64",
-      "public": true,
-      "regions": [
-        "tor1",
-        "syd1",
-        "sgp1",
-        "sfo3",
-        "sfo2",
-        "sfo1",
-        "nyc3",
-        "nyc2",
-        "nyc1",
-        "lon1",
-        "fra1",
-        "blr1",
-        "atl1",
-        "ams3",
-        "ams2"
-      ],
-      "created_at": "2023-06-22T20:26:46Z",
-      "min_disk_size": 10,
-      "type": "base",
-      "size_gigabytes": 0.5,
-      "description": "CentOS Stream 9 x64",
-      "tags": [],
-      "status": "available",
-      "error_message": ""
-    },
-*/
-
 type DOImage struct {
 	Name string `json:"name"`
 	Slug string `json:"slug"`
@@ -237,11 +200,9 @@ func GetDOResources(providerKey string) ([]DOResource, error) {
 	return resourcesResp.Data, nil
 }
 
-// 8 number UID
-func CreateInstanceUID() string {
+func CreateUID() string {
 	rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	num := rand.Intn(90000000) + 10000000 // always 8 digits
+	num := rand.Intn(90000000) + 10000000
 	numStr := strconv.Itoa(num)
 	return numStr
 }
@@ -257,9 +218,8 @@ func UploadDOSSHKey(providerKey, pubKeyPath string) (int, error) {
 	}
 	pubKey := strings.TrimSpace(string(data))
 
-	keyName := CreateInstanceUID()
+	keyName := CreateUID()
 
-	// Request payload
 	payload := map[string]string{
 		"name":       keyName,
 		"public_key": pubKey,
@@ -298,7 +258,6 @@ func UploadDOSSHKey(providerKey, pubKeyPath string) (int, error) {
 			return 0, err
 		}
 
-		logger.Info("Uploaded SSH Key to DigitalOcean. ID: " + logger.Highlight(strconv.Itoa(parsed.SSHKey.ID)))
 		return parsed.SSHKey.ID, nil
 	}
 
@@ -338,23 +297,40 @@ func UploadDOSSHKey(providerKey, pubKeyPath string) (int, error) {
 }
 
 type DOCreateRequest struct {
-	Name    string   `json:"name"`
-	SSHKeys []string `json:"ssh_keys"`
-	Image   string   `json:"image"`
-	Region  string   `json:"region"`
-	Size    string   `json:"size"`
+	Name    string        `json:"name"`
+	Region  string        `json:"region"`
+	Size    string        `json:"size"`
+	Image   string        `json:"image"`
+	SSHKeys []interface{} `json:"ssh_keys,omitempty"` // allow int IDs
+	IPv6    bool          `json:"ipv6,omitempty"`
+	Tags    []string      `json:"tags,omitempty"`
 }
 
-type DOresponseJSONBytes struct {
-	Creation_Time string   `json:"created"`
-	Host_UUID     string   `json:"host_uuid"`
-	Name          int      `json:"name"`
-	Host_Image    string   `json:"image"`
-	Ipv4          []string `json:"ipv4"`
-	Ipv6          string   `json:"ipv6"`
-	Label         string   `json:"label"`
-	Region        string   `json:"region"`
-	Type          string   `json:"type"`
+type DOCreateResponse struct {
+	Droplet struct {
+		ID        int    `json:"id"`
+		Name      string `json:"name"`
+		CreatedAt string `json:"created_at"`
+		SizeSlug  string `json:"size_slug"`
+		Region    struct {
+			Slug string `json:"slug"`
+			Name string `json:"name"`
+		} `json:"region"`
+		Image struct {
+			ID   int    `json:"id"`
+			Slug string `json:"slug"`
+		} `json:"image"`
+		Networks struct {
+			V4 []struct {
+				IPAddress string `json:"ip_address"`
+				Type      string `json:"type"`
+			} `json:"v4"`
+			V6 []struct {
+				IPAddress string `json:"ip_address"`
+				Type      string `json:"type"`
+			} `json:"v6"`
+		} `json:"networks"`
+	} `json:"droplet"`
 }
 
 type DOInstance struct {
@@ -367,249 +343,112 @@ type DOInstance struct {
 	Label         string `toml:"label"`
 	Region        string `toml:"region"`
 	Type          string `toml:"type"`
+	KeyID         int    `toml:"key_id"`
+	PrivKeyPath   string `toml:"priv_key_path"`
 }
 
 type DOInstancesToml map[string]DOInstance
 
-func CreateDroplet(providerKey, pubKeyID, image, region, resource, instanceFile string) (string, error) {
+func CreateDroplet(providerKey string, sshKeyID int, privKeyPath, image, region, sizeSlug, instanceFile string) (string, error) {
 	if providerKey == "" {
 		return "", logger.Errorf("Provider key is empty")
 	}
 
-	data, err := os.ReadFile(pubKeyID)
-	if err != nil {
-		return "", err
-	}
-
-	dataString := string(data)
-	dataStringStripped := strings.TrimSpace(dataString)
-
-	UID := CreateInstanceUID()
-
+	UID := CreateUID()
 	payload := DOCreateRequest{
 		Name:    UID,
 		Region:  region,
+		Size:    sizeSlug,
 		Image:   image,
-		Size:    resource,
-		SSHKeys: []string{dataStringStripped},
+		SSHKeys: []interface{}{sshKeyID},
+		IPv6:    true,
+		Tags:    []string{"vps3"},
 	}
 
-	jsonBody, err := json.Marshal(payload)
-	if err != nil {
-		logger.Errorf("Failed to marshal request payload: %v", err)
-	}
+	b, _ := json.Marshal(payload)
 
-	request, err := http.NewRequest("POST", "https://api.digitalocean.com/v2/droplets", bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return "", err
-	}
-	request.Header.Set("Authorization", "Bearer "+providerKey)
-	request.Header.Set("Content-Type", "application/json")
+	req, _ := http.NewRequest("POST", "https://api.digitalocean.com/v2/droplets", bytes.NewBuffer(b))
+	req.Header.Set("Authorization", "Bearer "+providerKey)
+	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
-	response, err := client.Do(request)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
 	}
-	defer response.Body.Close()
+	defer resp.Body.Close()
 
-	responseBytes, err := io.ReadAll(response.Body)
-	if err != nil {
+	rb, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+		return "", logger.Errorf("Unexpected status code: %d | %s", resp.StatusCode, string(rb))
+	}
+
+	var parsed DOCreateResponse
+	if err := json.Unmarshal(rb, &parsed); err != nil {
 		return "", err
 	}
 
-	logger.Debug(string(responseBytes))
-
-	var parsedResponseBytes DOresponseJSONBytes
-	err = json.Unmarshal(responseBytes, &parsedResponseBytes)
-	if err != nil {
-		return "", err
+	ipv4 := ""
+	for _, v := range parsed.Droplet.Networks.V4 {
+		if v.Type == "public" {
+			ipv4 = v.IPAddress
+			break
+		}
+	}
+	ipv6 := ""
+	for _, v := range parsed.Droplet.Networks.V6 {
+		if v.Type == "public" {
+			ipv6 = v.IPAddress
+			break
+		}
 	}
 
-	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated {
-		return "", logger.Errorf("Unexpected status code: %s | %s", strconv.Itoa(response.StatusCode), string(responseBytes))
+	vps := DOInstance{
+		Creation_Time: parsed.Droplet.CreatedAt,
+		Host_UUID:     "",
+		Id:            parsed.Droplet.ID,
+		Host_Image:    parsed.Droplet.Image.Slug,
+		Ipv4:          ipv4,
+		Ipv6:          ipv6,
+		Label:         parsed.Droplet.Name,
+		Region:        parsed.Droplet.Region.Slug,
+		Type:          parsed.Droplet.SizeSlug,
+		KeyID:         sshKeyID,    // persist
+		PrivKeyPath:   privKeyPath, // persist
 	}
 
-	VPS := DOInstance{
-		Creation_Time: parsedResponseBytes.Creation_Time,
-		Host_UUID:     parsedResponseBytes.Host_UUID,
-		Id:            parsedResponseBytes.Name,
-		Host_Image:    parsedResponseBytes.Host_Image,
-		Ipv4:          parsedResponseBytes.Ipv4[0],
-		Ipv6:          parsedResponseBytes.Ipv6,
-		Label:         parsedResponseBytes.Label,
-		Region:        parsedResponseBytes.Region,
-		Type:          parsedResponseBytes.Type,
-	}
-
-	var allinstances DOInstancesToml
-
+	var all DOInstancesToml
 	if _, err := os.Stat(instanceFile); err == nil {
-		if _, err := toml.DecodeFile(instanceFile, &allinstances); err != nil {
-			logger.Error("Unable to load pre-existing instance file: " + logger.Highlight(instanceFile) + string(err.Error()))
+		if _, err := toml.DecodeFile(instanceFile, &all); err != nil {
 			return "", err
 		}
 	} else {
-		allinstances = make(DOInstancesToml)
+		all = make(DOInstancesToml)
 	}
 
-	vpsIDStr := strconv.Itoa(VPS.Id)
-	allinstances[vpsIDStr] = VPS
-
-	f, err := os.Create(instanceFile)
-	if err != nil {
-		return "", err
-	}
+	idStr := strconv.Itoa(vps.Id)
+	all[idStr] = vps
+	f, _ := os.Create(instanceFile)
 	defer f.Close()
-
-	err = toml.NewEncoder(f).Encode(allinstances)
-	if err != nil {
+	if err := toml.NewEncoder(f).Encode(all); err != nil {
 		return "", err
 	}
-
 	logger.Info("Updated VPS instance file: " + logger.Highlight(instanceFile))
+	return idStr, nil
+}
+
+func DeleteDOSSHKey(providerKey string, keyID int) error {
+	req, _ := http.NewRequest("DELETE",
+		fmt.Sprintf("https://api.digitalocean.com/v2/account/keys/%d", keyID), nil)
+	req.Header.Set("Authorization", "Bearer "+providerKey)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", err
+		return err
 	}
-
-	return "", nil
-}
-
-/*
-{
-	"droplet": {
-		"id": 3164444,
-		"name": "example.com",
-		"memory": 1024,
-		"vcpus": 1,
-		"disk": 25,
-		"disk_info": [
-			{
-				"type": "local",
-				"size": {
-					"amount": 25,
-					"unit": "gib"
-				}
-			}
-		],
-		"locked": false,
-		"status": "new",
-		"kernel": null,
-		"created_at": "2020-07-21T18:37:44Z",
-		"features": [
-			"backups",
-			"private_networking",
-			"ipv6",
-			"monitoring"
-		],
-		"backup_ids": [ ],
-		"next_backup_window": null,
-		"snapshot_ids": [ ],
-		"image": {
-		"id": 63663980,
-		"name": "20.04 (LTS) x64",
-		"distribution": "Ubuntu",
-		"slug": "ubuntu-20-04-x64",
-		"public": true,
-		"regions": [
-			"ams2",
-			"ams3",
-			"blr1",
-			"fra1",
-			"lon1",
-			"nyc1",
-			"nyc2",
-			"nyc3",
-			"sfo1",
-			"sfo2",
-			"sfo3",
-			"sgp1",
-			"tor1"
-		],
-		"created_at": "2020-05-15T05:47:50Z",
-		"type": "snapshot",
-		"min_disk_size": 20,
-		"size_gigabytes": 2.36,
-		"description": "",
-		"tags": [ ],
-		"status": "available",
-		"error_message": ""
-	},
-	"volume_ids": [ ],
-	"size":
-	{
-	"slug": "s-1vcpu-1gb",
-	"memory": 1024,
-	"vcpus": 1,
-	"disk": 25,
-	"transfer": 1,
-	"price_monthly": 5,
-	"price_hourly": 0.00743999984115362,
-	"regions": [
-		"ams2",
-		"ams3",
-		"blr1",
-		"fra1",
-		"lon1",
-		"nyc1",
-		"nyc2",
-		"nyc3",
-		"sfo1",
-		"sfo2",
-		"sfo3",
-		"sgp1",
-		"tor1"
-	],
-	"available": true,
-	"description": "Basic"
-	},
-	"size_slug": "s-1vcpu-1gb",
-	"networks": {
-		"v4": [ ],
-		"v6": [ ]
-	},
-	"region": {
-		"name": "New York 3",
-		"slug": "nyc3",
-		"features": [
-			"private_networking",
-			"backups",
-			"ipv6",
-			"metadata",
-			"install_agent",
-			"storage",
-			"image_transfer"
-		],
-		"available": true,
-		"sizes": [
-			"s-1vcpu-1gb",
-			"s-1vcpu-2gb",
-			"s-1vcpu-3gb",
-			"s-2vcpu-2gb",
-			"s-3vcpu-1gb",
-			"s-2vcpu-4gb",
-			"s-4vcpu-8gb",
-			"s-6vcpu-16gb",
-			"s-8vcpu-32gb",
-			"s-12vcpu-48gb",
-			"s-16vcpu-64gb",
-			"s-20vcpu-96gb",
-			"s-24vcpu-128gb",
-			"s-32vcpu-192g"
-		]
-	},
-	"tags": [
-		"web",
-		"env:prod"
-	]
-	},
-	"links": {
-		"actions": [{
-			"id": 7515,
-			"rel": "create",
-			"href": "https://api.digitalocean.com/v2/actions/7515"
-		}
-		]
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		b, _ := io.ReadAll(resp.Body)
+		return logger.Errorf("SSH key deletion failed: %d %s", resp.StatusCode, string(b))
 	}
+	return nil
 }
-*/
