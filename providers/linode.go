@@ -437,7 +437,7 @@ func ListLinodeInstancesTable(providerKey string) (string, error) {
 
 }
 
-type Instances struct {
+type LinodeInstances struct {
 	Creation_Time string   `json:"created"`
 	Id            int      `json:"id"`
 	Host_Image    string   `json:"image"`
@@ -446,11 +446,11 @@ type Instances struct {
 	Region        string   `json:"region"`
 }
 
-type InstancesResponse struct {
-	Data []Instances `json:"data"`
+type LinodeInstancesResponse struct {
+	Data []LinodeInstances `json:"data"`
 }
 
-func SelectLinodeInstance(providerKey string) ([]Instances, error) {
+func SelectLinodeInstance(providerKey string) ([]LinodeInstances, error) {
 	if providerKey == "" {
 		return nil, logger.Errorf("Provider key is empty")
 	}
@@ -475,7 +475,7 @@ func SelectLinodeInstance(providerKey string) ([]Instances, error) {
 		return nil, logger.Errorf("Unexpected status code: %d | %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	var instancesResp InstancesResponse
+	var instancesResp LinodeInstancesResponse
 	err = json.NewDecoder(resp.Body).Decode(&instancesResp)
 	if err != nil {
 		return nil, err
