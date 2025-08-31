@@ -335,7 +335,6 @@ type DOCreateResponse struct {
 
 type DOInstance struct {
 	Creation_Time string `toml:"created"`
-	Host_UUID     string `toml:"host_uuid"`
 	Id            int    `toml:"id"`
 	Host_Image    string `toml:"image"`
 	Ipv4          string `toml:"ipv4"`
@@ -405,7 +404,6 @@ func CreateDroplet(providerKey string, sshKeyID int, privKeyPath, image, region,
 
 	vps := DOInstance{
 		Creation_Time: parsed.Droplet.CreatedAt,
-		Host_UUID:     "",
 		Id:            parsed.Droplet.ID,
 		Host_Image:    parsed.Droplet.Image.Slug,
 		Ipv4:          ipv4,
@@ -413,8 +411,8 @@ func CreateDroplet(providerKey string, sshKeyID int, privKeyPath, image, region,
 		Label:         parsed.Droplet.Name,
 		Region:        parsed.Droplet.Region.Slug,
 		Type:          parsed.Droplet.SizeSlug,
-		KeyID:         sshKeyID,    // persist
-		PrivKeyPath:   privKeyPath, // persist
+		KeyID:         sshKeyID,
+		PrivKeyPath:   privKeyPath,
 	}
 
 	var all DOInstancesToml
@@ -451,4 +449,93 @@ func DeleteDOSSHKey(providerKey string, keyID int) error {
 		return logger.Errorf("SSH key deletion failed: %d %s", resp.StatusCode, string(b))
 	}
 	return nil
+}
+
+type DOInstances struct {
+	Creation_Time string `json:"created_at"`
+	Id            int    `json:"id"`
+	Image         struct {
+		Slug string `json:"slug"`
+	} `json:"image"`
+	Networks struct {
+		IPv4 []struct {
+			IPAddress string `json:"ip_address"`
+		} `json:"v4"`
+	} `json:"networks"`
+	Ipv6   string `json:"ipv6"`
+	Region struct {
+		Name string `json:"name"`
+		Slug string `json:"slug"`
+	} `json:"region"`
+}
+
+type DOInstancesResponse struct {
+	Data []DOInstances `json:"droplets"`
+}
+
+func SelectDOInstance(providerKey string) ([]DOInstances, error) {
+	if providerKey == "" {
+		return nil, logger.Errorf("Provider key is empty")
+	}
+
+	req, err := http.NewRequest("GET", "https://api.digitalocean.com/v2/droplets?page=0&per_page=0", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+providerKey)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		fmt.Print(bodyBytes)
+		return nil, logger.Errorf("Unexpected status code: %d | %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var instancesResp DOInstancesResponse
+	err = json.NewDecoder(resp.Body).Decode(&instancesResp)
+	if err != nil {
+		return nil, err
+	}
+
+	return instancesResp.Data, nil
+
+}
+
+func DestroyDroplet(providerKey, instanceID, instanceFile string) (string, error) {
+	if providerKey == "" {
+		return "", logger.Errorf("Provider key is empty")
+	}
+
+	req, err := http.NewRequest("DELETE", "https://api.digitalocean.com/v2/droplets/"+instanceID, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+providerKey)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	logger.Success("Deleted droplet: " + logger.Highlight(instanceID))
+
+	// remove instanceID table in instance toml file
+	err = DeleteByTableName(instanceFile, instanceID)
+
+	if err != nil {
+		return "", logger.Errorf("Failed to update the instanceFile: %s", instanceFile)
+	}
+
+	return "", nil
+
 }

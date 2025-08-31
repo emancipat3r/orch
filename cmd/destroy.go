@@ -17,20 +17,19 @@ var destroyCmd = &cobra.Command{
 	Short: "Destroy a VPS instance",
 	Run: func(cmd *cobra.Command, args []string) {
 		provider := ui.ChoiceProvider()
+		user, err := user.Current()
+		if err != nil {
+			logger.Error("Failed to get current user: " + err.Error())
+			return
+		}
+
+		pathConfig = user.HomeDir + "/.config/vps/config/"
+		configFile = pathConfig + "configuration.toml"
+		pathInstances = user.HomeDir + "/.config/vps/instances/"
+		instanceFile = pathInstances + "instances.toml"
 
 		switch provider {
 		case "Linode":
-			user, err := user.Current()
-			if err != nil {
-				logger.Error("Failed to get current user: " + err.Error())
-				return
-			}
-
-			pathConfig = user.HomeDir + "/.config/vps/config/"
-			configFile = pathConfig + "configuration.toml"
-			pathInstances = user.HomeDir + "/.config/vps/instances/"
-			instanceFile = pathInstances + "instances.toml"
-
 			providerKey := providers.GetLinodeAPIKey(configFile, provider)
 
 			accountBalance, err := providers.GetLinodesBalance(providerKey)
@@ -74,7 +73,45 @@ var destroyCmd = &cobra.Command{
 			}
 
 		case "DigitalOcean":
-			logger.Info("Work in progress...")
+			providerKey := providers.GetDOAPIKey(configFile, provider)
+			accountBalance, err := providers.GetDOBalance(providerKey)
+			if err != nil {
+				logger.Error("Failed to get DigitalOcean account balance: " + err.Error())
+				return
+			}
+			logger.Info("DigitalOcean account balance: " + logger.Highlight("$"+accountBalance))
+
+			instances, err := providers.SelectDOInstance(providerKey)
+
+			if err != nil {
+				logger.Error("Failed to hit endpoint: " + err.Error())
+				return
+			}
+
+			var instanceOptions []string
+
+			for _, instance := range instances {
+				instanceOptions = append(instanceOptions, instance.Creation_Time+" - "+strconv.Itoa(instance.Id)+" - "+instance.Image.Slug+" - "+instance.Networks.IPv4+" - "+instance.Region.Slug)
+			}
+
+			selectedInstance := ui.Select("Select the instance:", instanceOptions)
+			logger.Info("You selected instance: " + logger.Highlight(selectedInstance))
+			choice := ui.Confirm("Are you sure you want to proceed?")
+
+			if choice == false {
+				os.Exit(1)
+			}
+
+			selectedInstanceSplit := strings.Split(selectedInstance, " ")
+
+			logger.Info("Destroying droplet: " + logger.Highlight(selectedInstanceSplit[2]))
+
+			providers.DestroyDroplet(providerKey, selectedInstanceSplit[2], instanceFile)
+
+			if err != nil {
+				logger.Error("Failed to destroy droplet: " + err.Error())
+			}
+
 		case "Vultr":
 			logger.Info("Work in progress...")
 		default:
