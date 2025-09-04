@@ -131,7 +131,44 @@ var destroyCmd = &cobra.Command{
 			}
 
 		case "Vultr":
-			logger.Info("Work in progress...")
+			providerKey := providers.GetVultrAPIKey(configFile, provider)
+			accountBalance, err := providers.GetVultrBalance(providerKey)
+			if err != nil {
+				logger.Error("Failed to get Vultr account balance: " + err.Error())
+				return
+			}
+			logger.Info("Vultr account balance: " + logger.Highlight("$"+accountBalance))
+
+			instances, err := providers.SelectVultrInstance(providerKey)
+
+			if err != nil {
+				logger.Error("Failed to hit endpoint: " + err.Error())
+				return
+			}
+
+			var instanceOptions []string
+
+			for _, instance := range instances {
+				instanceOptions = append(instanceOptions, instance.DateCreated+" - "+instance.ID+" - "+instance.OS+" - "+instance.MainIP+" - "+instance.Region)
+			}
+
+			selectedInstance := ui.Select("Select the instance:", instanceOptions)
+			logger.Info("You selected instance: " + logger.Highlight(selectedInstance))
+			choice := ui.Confirm("Are you sure you want to proceed?")
+
+			if choice == false {
+				os.Exit(1)
+			}
+
+			selectedInstanceSplit := strings.Split(selectedInstance, " ")
+
+			logger.Info("Destroying Vultr instance: " + logger.Highlight(selectedInstanceSplit[2]))
+
+			err = providers.DestroyVultr(providerKey, selectedInstanceSplit[2], instanceFile)
+
+			if err != nil {
+				logger.Error("Failed to destroy Vultr instance: " + err.Error())
+			}
 		default:
 			logger.Warn("No provider was selected. Exiting...")
 		}

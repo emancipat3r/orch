@@ -357,9 +357,6 @@ func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, in
 	}
 
 	logger.Info("Updated VPS instance file: " + logger.Highlight(instanceFile))
-	if err != nil {
-		return "", err
-	}
 
 	return "", nil
 }
@@ -495,7 +492,7 @@ func DeleteByTableName(instanceFile string, instanceID ...string) error {
 	}
 
 	if _, err := toml.DecodeFile(instanceFile, &m); err != nil {
-		return logger.Errorf("decode toml: %w", err)
+		return logger.Errorf("decode toml: %v", err)
 	}
 
 	if m == nil {
@@ -512,13 +509,13 @@ func DeleteByTableName(instanceFile string, instanceID ...string) error {
 	f, err := os.Create(tmp)
 
 	if err != nil {
-		return logger.Errorf("Failed creating tmp instance file: %w", err)
+		return logger.Errorf("Failed creating tmp instance file: %v", err)
 	}
 
 	if err := toml.NewEncoder(f).Encode(m); err != nil {
 		_ = f.Close()
 		_ = os.Remove(tmp)
-		return logger.Errorf("Failed updating instance file: %w", err)
+		return logger.Errorf("Failed updating instance file: %v", err)
 	}
 
 	if err := f.Close(); err != nil {
