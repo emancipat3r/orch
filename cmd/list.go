@@ -62,7 +62,30 @@ var listCmd = &cobra.Command{
 
 			providers.ListDOInstancesTable(providerKey)
 		case "Vultr":
-			logger.Info("Work in progress...")
+			user, err := user.Current()
+			if err != nil {
+				logger.Error("Failed to get current user: " + err.Error())
+				return
+			}
+
+			pathConfig = user.HomeDir + "/.config/vps/config/"
+			configFile = pathConfig + "configuration.toml"
+
+			providerKey := providers.GetVultrAPIKey(configFile, provider)
+
+			accountBalance, err := providers.GetVultrBalance(providerKey)
+
+			if err != nil {
+				logger.Error("Failed to get Vultr account balance: " + err.Error())
+				return
+			}
+
+			logger.Info("Vultr account balance: " + logger.Highlight("$"+accountBalance))
+
+			_, err = providers.ListVultrInstancesTable(providerKey)
+			if err != nil {
+				logger.Error("Failed to list Vultr instances: " + err.Error())
+			}
 		default:
 			logger.Warn("No provider was selected. Exiting...")
 		}

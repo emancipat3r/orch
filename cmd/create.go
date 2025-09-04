@@ -203,7 +203,115 @@ var createCmd = &cobra.Command{
 			}
 
 		case "Vultr":
-			logger.Info("Work in progress...")
+			providerKey := providers.GetVultrAPIKey(configFile, provider)
+			accountBalance, err := providers.GetVultrBalance(providerKey)
+			if err != nil {
+				logger.Error("Failed to get Vultr account balance: " + err.Error())
+				return
+			}
+			logger.Info("Vultr account balance: " + logger.Highlight("$"+accountBalance))
+
+			// region
+			regions, err := providers.GetVultrRegions(providerKey)
+			if err != nil {
+				logger.Error("Failed to hit endpoint: " + err.Error())
+				return
+			}
+			var regionOptions []string
+			for _, r := range regions {
+				regionOptions = append(regionOptions, r.ID+" - "+r.City+", "+r.Country)
+			}
+			selectedRegion := ui.Select("Select your region:", regionOptions)
+			logger.Info("You selected region: " + logger.Highlight(selectedRegion))
+			selectedRegionID := strings.Split(selectedRegion, " ")[0]
+
+			// OS images
+			osImages, err := providers.GetVultrOS(providerKey)
+			if err != nil {
+				logger.Error("Failed to hit endpoint: " + err.Error())
+				return
+			}
+			var osOptions []string
+			for _, os := range osImages {
+				osOptions = append(osOptions, strconv.Itoa(os.ID)+" - "+os.Name)
+			}
+			selectedOS := ui.Select("Select your OS:", osOptions)
+			logger.Info("You selected OS: " + logger.Highlight(selectedOS))
+			selectedOSIDStr := strings.Split(selectedOS, " ")[0]
+			selectedOSID, _ := strconv.Atoi(selectedOSIDStr)
+
+			// plans
+			plans, err := providers.GetVultrPlans(providerKey)
+			if err != nil {
+				logger.Error("Failed to hit endpoint: " + err.Error())
+				return
+			}
+			var planOptions []string
+			for _, p := range plans {
+				// Filter plans available in the selected region
+				regionAvailable := false
+				for _, loc := range p.Locations {
+					if loc == selectedRegionID {
+						regionAvailable = true
+						break
+					}
+				}
+				if regionAvailable {
+					planOptions = append(planOptions, p.ID+" - $"+strconv.FormatFloat(p.MonthlyCost, 'f', 2, 64)+"/mo ("+strconv.Itoa(p.VCPUCount)+" vCPU, "+strconv.Itoa(p.RAM)+"MB RAM)")
+				}
+			}
+			selectedPlan := ui.Select("Select your plan:", planOptions)
+			logger.Info("You selected plan: " + logger.Highlight(selectedPlan))
+			selectedPlanID := strings.Split(selectedPlan, " ")[0]
+
+			// === Per-instance keypair (using charmbracelet/keygen) ===
+			keyName := "vultr-" + providers.CreateUID()
+			perPriv := pathSSH + keyName // ~/.config/vps/.ssh/vultr-XXXXXXXX
+			perPub := perPriv + ".pub"
+
+			// optional: passphrase (store per key)
+			pass, err := utils.GenerateRandomPassword(24)
+			if err != nil {
+				logger.Error("Failed to gen passphrase: " + err.Error())
+				return
+			}
+			if err := os.WriteFile(pathSecrets+keyName+".pass", []byte(pass+"\n"), 0600); err != nil {
+				logger.Error("Failed to store passphrase: " + err.Error())
+				return
+			}
+
+			// create the keypair
+			if _, err := keygen.New(perPriv, keygen.WithKeyType(keygen.Ed25519), keygen.WithPassphrase(pass), keygen.WithWrite()); err != nil {
+				logger.Error("Failed to create per-instance keypair: " + err.Error())
+				return
+			}
+
+			// Upload pubkey to Vultr → get unique key ID
+			keyID, err := providers.UploadVultrSSHKey(providerKey, perPub)
+			if err != nil {
+				logger.Error("Failed to upload SSH key to Vultr: " + err.Error())
+				return
+			}
+			logger.Info("Per-instance SSH key ID: " + logger.Highlight(keyID))
+
+			// Create the instance with this key ID and persist priv key path
+			logger.Info("Creating Vultr instance...")
+			instanceID, err := providers.CreateVultrInstance(
+				providerKey,
+				keyID,
+				perPriv,
+				selectedOSID,
+				selectedRegionID,
+				selectedPlanID,
+				instanceFile,
+			)
+
+			if err != nil {
+				logger.Error("Failed to create Vultr instance: " + err.Error())
+			} else {
+				logger.Info("Successfully created Vultr instance: " + logger.Highlight(instanceID))
+			}
+
 		default:
 			logger.Warn("No provider was selected. Exiting...")
 		}
