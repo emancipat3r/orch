@@ -8,12 +8,14 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/emancipat3r/vps3/logger"
+	"github.com/emancipat3r/vps3/ui"
 	"github.com/emancipat3r/vps3/utils"
 )
 
@@ -302,7 +304,6 @@ type DOCreateRequest struct {
 	Size    string        `json:"size"`
 	Image   string        `json:"image"`
 	SSHKeys []interface{} `json:"ssh_keys,omitempty"` // allow int IDs
-	IPv6    bool          `json:"ipv6,omitempty"`
 	Tags    []string      `json:"tags,omitempty"`
 }
 
@@ -338,7 +339,6 @@ type DOInstance struct {
 	Id            int    `toml:"id"`
 	Host_Image    string `toml:"image"`
 	Ipv4          string `toml:"ipv4"`
-	Ipv6          string `toml:"ipv6"`
 	Label         string `toml:"label"`
 	Region        string `toml:"region"`
 	Type          string `toml:"type"`
@@ -360,7 +360,6 @@ func CreateDroplet(providerKey string, sshKeyID int, privKeyPath, image, region,
 		Size:    sizeSlug,
 		Image:   image,
 		SSHKeys: []interface{}{sshKeyID},
-		IPv6:    true,
 		Tags:    []string{"vps3"},
 	}
 
@@ -394,20 +393,12 @@ func CreateDroplet(providerKey string, sshKeyID int, privKeyPath, image, region,
 			break
 		}
 	}
-	ipv6 := ""
-	for _, v := range parsed.Droplet.Networks.V6 {
-		if v.Type == "public" {
-			ipv6 = v.IPAddress
-			break
-		}
-	}
 
 	vps := DOInstance{
 		Creation_Time: parsed.Droplet.CreatedAt,
 		Id:            parsed.Droplet.ID,
 		Host_Image:    parsed.Droplet.Image.Slug,
 		Ipv4:          ipv4,
-		Ipv6:          ipv6,
 		Label:         parsed.Droplet.Name,
 		Region:        parsed.Droplet.Region.Slug,
 		Type:          parsed.Droplet.SizeSlug,
@@ -455,18 +446,24 @@ type DOInstances struct {
 	Creation_Time string `json:"created_at"`
 	Id            int    `json:"id"`
 	Image         struct {
-		Slug string `json:"slug"`
+		Name        string `json:"name"`
+		Slug        string `json:"slug"`
+		Description string `json:"description"`
 	} `json:"image"`
 	Networks struct {
 		IPv4 []struct {
 			IPAddress string `json:"ip_address"`
+			Type      string `json:"type"`
 		} `json:"v4"`
 	} `json:"networks"`
-	Ipv6   string `json:"ipv6"`
 	Region struct {
 		Name string `json:"name"`
 		Slug string `json:"slug"`
 	} `json:"region"`
+	Size struct {
+		Slug string `json:"slug"`
+	} `json:"size"`
+	Status string `json:"status"`
 }
 
 type DOInstancesResponse struct {
@@ -513,6 +510,23 @@ func DestroyDroplet(providerKey, instanceID, instanceFile string) (string, error
 		return "", logger.Errorf("Provider key is empty")
 	}
 
+	// First, load the instance data to get the SSH key ID before deleting
+	var instances DOInstancesToml
+	if _, err := os.Stat(instanceFile); err == nil {
+		if _, err := toml.DecodeFile(instanceFile, &instances); err != nil {
+			return "", logger.Errorf("Failed to load instances file: %v", err)
+		}
+	} else {
+		return "", logger.Errorf("Instance file not found: %s", instanceFile)
+	}
+
+	// Get the instance data to retrieve KeyID
+	instance, exists := instances[instanceID]
+	if !exists {
+		return "", logger.Errorf("Instance %s not found in instances file", instanceID)
+	}
+
+	// Delete the droplet first
 	req, err := http.NewRequest("DELETE", "https://api.digitalocean.com/v2/droplets/"+instanceID, nil)
 	if err != nil {
 		return "", err
@@ -529,13 +543,178 @@ func DestroyDroplet(providerKey, instanceID, instanceFile string) (string, error
 
 	logger.Success("Deleted droplet: " + logger.Highlight(instanceID))
 
-	// remove instanceID table in instance toml file
-	err = DeleteByTableName(instanceFile, instanceID)
-
-	if err != nil {
-		return "", logger.Errorf("Failed to update the instanceFile: %s", instanceFile)
+	// Delete the SSH key from DigitalOcean
+	if instance.KeyID != 0 {
+		err = DeleteDOSSHKey(providerKey, instance.KeyID)
+		if err != nil {
+			logger.Warn("Failed to delete SSH key from DigitalOcean: " + err.Error())
+			// Don't return error here as droplet is already deleted
+		} else {
+			logger.Success("Deleted SSH key: " + logger.Highlight(strconv.Itoa(instance.KeyID)))
+		}
 	}
 
-	return "", nil
+	// Delete the private key file if it exists
+	if instance.PrivKeyPath != "" {
+		if err := os.Remove(instance.PrivKeyPath); err != nil {
+			logger.Warn("Failed to delete private key file: " + err.Error())
+		} else {
+			logger.Success("Deleted private key file: " + logger.Highlight(instance.PrivKeyPath))
+		}
 
+		// Also try to delete the passphrase file
+		passPhraseFile := strings.Replace(instance.PrivKeyPath, "/.ssh/", "/.secrets/", 1)
+		passPhraseFile = strings.TrimSuffix(passPhraseFile, filepath.Ext(passPhraseFile)) + ".pass"
+		if err := os.Remove(passPhraseFile); err != nil {
+			// Don't warn about this as it might not exist
+		} else {
+			logger.Success("Deleted passphrase file: " + logger.Highlight(passPhraseFile))
+		}
+	}
+
+	// Remove the instance from the TOML file
+	delete(instances, instanceID)
+
+	// Write the updated instances file atomically
+	tmp := instanceFile + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return "", logger.Errorf("Failed creating tmp instance file: %v", err)
+	}
+
+	if err := toml.NewEncoder(f).Encode(instances); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return "", logger.Errorf("Failed updating instance file: %v", err)
+	}
+
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return "", logger.Errorf("Failed to close tmp instance file: %v", err)
+	}
+
+	if err := os.Rename(tmp, instanceFile); err != nil {
+		_ = os.Remove(tmp)
+		return "", logger.Errorf("Failed to rename tmp instance file: %v", err)
+	}
+
+	logger.Success("Updated instance file: " + logger.Highlight(instanceFile))
+
+	return "", nil
+}
+
+func ListDOInstancesTable(providerKey string) (string, error) {
+	if providerKey == "" {
+		return "", logger.Errorf("Provider key is empty")
+	}
+
+	req, err := http.NewRequest("GET", "https://api.digitalocean.com/v2/droplets?page=0&per_page=0", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+providerKey)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		fmt.Print(bodyBytes)
+		return "", logger.Errorf("Unexpected status code: %d | %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var instancesResp DOInstancesResponse
+	err = json.NewDecoder(resp.Body).Decode(&instancesResp)
+	if err != nil {
+		return "", err
+	}
+
+	// Load existing instances from TOML file to check/update IP addresses
+	instanceFile := os.Getenv("HOME") + "/.config/vps/instances/instances.toml"
+	var storedInstances DOInstancesToml
+	var hasChanges bool
+
+	if _, err := os.Stat(instanceFile); err == nil {
+		if _, err := toml.DecodeFile(instanceFile, &storedInstances); err != nil {
+			logger.Warn("Failed to load instances file for IP sync: " + err.Error())
+			storedInstances = make(DOInstancesToml)
+		}
+	} else {
+		storedInstances = make(DOInstancesToml)
+	}
+
+	var rows [][]string
+	for _, inst := range instancesResp.Data {
+		var ipv4 string
+		// Find the public IPv4 address
+		for _, v4 := range inst.Networks.IPv4 {
+			if v4.Type == "public" {
+				ipv4 = v4.IPAddress
+				break
+			}
+		}
+
+		// Check if we need to update the stored instance with current IP
+		instanceIDStr := strconv.Itoa(inst.Id)
+		if storedInstance, exists := storedInstances[instanceIDStr]; exists {
+			if storedInstance.Ipv4 != ipv4 && ipv4 != "" {
+				// Update the stored instance with new IP
+				storedInstance.Ipv4 = ipv4
+				storedInstances[instanceIDStr] = storedInstance
+				hasChanges = true
+				logger.Info("Updated IP for droplet " + logger.Highlight(instanceIDStr) + ": " + logger.Highlight(ipv4))
+			}
+		}
+
+		// Use image description if available, fallback to name, then slug
+		imageName := inst.Image.Description
+		if imageName == "" {
+			imageName = inst.Image.Name
+		}
+		if imageName == "" {
+			imageName = inst.Image.Slug
+		}
+
+		rows = append(rows, []string{
+			fmt.Sprintf("%d", inst.Id),
+			ipv4,
+			inst.Region.Name + " - " + inst.Region.Slug,
+			imageName,
+			inst.Size.Slug,
+			inst.Creation_Time,
+			inst.Status,
+		})
+	}
+
+	// Write back the instances file if we made changes
+	if hasChanges {
+		tmp := instanceFile + ".tmp"
+		f, err := os.Create(tmp)
+		if err != nil {
+			logger.Warn("Failed to create temp file for IP sync: " + err.Error())
+		} else {
+			if err := toml.NewEncoder(f).Encode(storedInstances); err != nil {
+				_ = f.Close()
+				_ = os.Remove(tmp)
+				logger.Warn("Failed to encode updated instances: " + err.Error())
+			} else if err := f.Close(); err != nil {
+				_ = os.Remove(tmp)
+				logger.Warn("Failed to close temp instances file: " + err.Error())
+			} else if err := os.Rename(tmp, instanceFile); err != nil {
+				_ = os.Remove(tmp)
+				logger.Warn("Failed to update instances file: " + err.Error())
+			} else {
+				logger.Success("Synced IP addresses to instances file")
+			}
+		}
+	}
+
+	fmt.Println(ui.InstanceTable(rows))
+
+	return "", nil
 }

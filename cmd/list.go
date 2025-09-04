@@ -40,7 +40,27 @@ var listCmd = &cobra.Command{
 			providers.ListLinodeInstancesTable(providerKey)
 
 		case "DigitalOcean":
-			logger.Info("Work in progress...")
+			user, err := user.Current()
+			if err != nil {
+				logger.Error("Failed to get current user: " + err.Error())
+				return
+			}
+
+			pathConfig = user.HomeDir + "/.config/vps/config/"
+			configFile = pathConfig + "configuration.toml"
+
+			providerKey := providers.GetDOAPIKey(configFile, provider)
+
+			accountBalance, err := providers.GetDOBalance(providerKey)
+
+			if err != nil {
+				logger.Error("Failed to get DigitalOcean account balance: " + err.Error())
+				return
+			}
+
+			logger.Info("DigitalOcean account balance: " + logger.Highlight("$"+accountBalance))
+
+			providers.ListDOInstancesTable(providerKey)
 		case "Vultr":
 			logger.Info("Work in progress...")
 		default:

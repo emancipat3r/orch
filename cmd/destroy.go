@@ -91,7 +91,25 @@ var destroyCmd = &cobra.Command{
 			var instanceOptions []string
 
 			for _, instance := range instances {
-				instanceOptions = append(instanceOptions, instance.Creation_Time+" - "+strconv.Itoa(instance.Id)+" - "+instance.Image.Slug+" - "+instance.Networks.IPv4+" - "+instance.Region.Slug)
+				var ipv4 string
+				// Find the public IPv4 address
+				for _, v4 := range instance.Networks.IPv4 {
+					if v4.Type == "public" {
+						ipv4 = v4.IPAddress
+						break
+					}
+				}
+
+				// Use image description if available, fallback to name, then slug
+				imageName := instance.Image.Description
+				if imageName == "" {
+					imageName = instance.Image.Name
+				}
+				if imageName == "" {
+					imageName = instance.Image.Slug
+				}
+
+				instanceOptions = append(instanceOptions, instance.Creation_Time+" - "+strconv.Itoa(instance.Id)+" - "+imageName+" - "+ipv4+" - "+instance.Region.Slug)
 			}
 
 			selectedInstance := ui.Select("Select the instance:", instanceOptions)
