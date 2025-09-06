@@ -25,6 +25,8 @@ var listCmd = &cobra.Command{
 
 			pathConfig = user.HomeDir + "/.config/vps/config/"
 			configFile = pathConfig + "configuration.toml"
+			pathInstances = user.HomeDir + "/.config/vps/instances/"
+			instanceFile = pathInstances + "instances.toml"
 
 			providerKey := providers.GetLinodeAPIKey(configFile, provider)
 
@@ -37,7 +39,7 @@ var listCmd = &cobra.Command{
 
 			logger.Info("Linode account balance: " + logger.Highlight("$"+accountBalance))
 
-			providers.ListLinodeInstancesTable(providerKey)
+			providers.ListLinodeInstancesTable(providerKey, instanceFile)
 
 		case "DigitalOcean":
 			user, err := user.Current()
@@ -60,7 +62,10 @@ var listCmd = &cobra.Command{
 
 			logger.Info("DigitalOcean account balance: " + logger.Highlight("$"+accountBalance))
 
-			providers.ListDOInstancesTable(providerKey)
+			_, err = providers.ListDOInstancesTable(providerKey)
+			if err != nil {
+				logger.Error("Failed to list DigitalOcean instances: " + err.Error())
+			}
 		case "Vultr":
 			user, err := user.Current()
 			if err != nil {
@@ -70,6 +75,8 @@ var listCmd = &cobra.Command{
 
 			pathConfig = user.HomeDir + "/.config/vps/config/"
 			configFile = pathConfig + "configuration.toml"
+			pathInstances = user.HomeDir + "/.config/vps/instances/"
+			instanceFile = pathInstances + "instances.toml"
 
 			providerKey := providers.GetVultrAPIKey(configFile, provider)
 
@@ -82,7 +89,7 @@ var listCmd = &cobra.Command{
 
 			logger.Info("Vultr account balance: " + logger.Highlight("$"+accountBalance))
 
-			_, err = providers.ListVultrInstancesTable(providerKey)
+			_, err = providers.ListVultrInstancesTable(providerKey, instanceFile)
 			if err != nil {
 				logger.Error("Failed to list Vultr instances: " + err.Error())
 			}

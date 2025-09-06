@@ -2,13 +2,14 @@ package providers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/emancipat3r/vps3/logger"
@@ -341,13 +342,12 @@ type VultrInstanceRecord struct {
 	SSHKeyID        string `toml:"ssh_key_id"`
 	PrivKeyPath     string `toml:"priv_key_path"`
 	DefaultPassword string `toml:"default_password"`
+	Provider        string `toml:"provider"`
 }
 
 type VultrInstancesToml map[string]VultrInstanceRecord
 
 func CreateVultrInstance(providerKey string, sshKeyID string, privKeyPath string, osID int, region string, plan string, instanceFile string) (string, error) {
-	// Use separate instance file for Vultr to avoid conflicts with other providers
-	vultrInstanceFile := strings.Replace(instanceFile, "instances.toml", "vultr-instances.toml", 1)
 	if providerKey == "" {
 		return "", logger.Errorf("Provider key is empty")
 	}
@@ -389,23 +389,105 @@ func CreateVultrInstance(providerKey string, sshKeyID string, privKeyPath string
 		return "", err
 	}
 
+	logger.Info("Instance created with ID: " + logger.Highlight(parsed.Instance.ID))
+
+	// Start the spinner
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	spinnerProg, doneChan := ui.IPWaitSpinner(ctx, "Waiting for IP address assignment...")
+
+	// Wait for IP address to be assigned
+	var finalIP string
+	maxWaitTime := 5 * time.Minute
+	checkInterval := 10 * time.Second
+	startTime := time.Now()
+
+	go func() {
+		defer close(doneChan)
+
+		for time.Since(startTime) < maxWaitTime {
+			// Get current instance details
+			instanceReq, err := http.NewRequest("GET", "https://api.vultr.com/v2/instances/"+parsed.Instance.ID, nil)
+			if err != nil {
+				time.Sleep(checkInterval)
+				continue
+			}
+			instanceReq.Header.Set("Authorization", "Bearer "+providerKey)
+			instanceReq.Header.Set("Accept", "application/json")
+
+			instanceResp, err := http.DefaultClient.Do(instanceReq)
+			if err != nil {
+				time.Sleep(checkInterval)
+				continue
+			}
+
+			instanceRb, err := io.ReadAll(instanceResp.Body)
+			instanceResp.Body.Close()
+
+			if err != nil {
+				time.Sleep(checkInterval)
+				continue
+			}
+
+			if instanceResp.StatusCode != http.StatusOK {
+				time.Sleep(checkInterval)
+				continue
+			}
+
+			var instanceData struct {
+				Instance VultrInstance `json:"instance"`
+			}
+
+			if err := json.Unmarshal(instanceRb, &instanceData); err != nil {
+				time.Sleep(checkInterval)
+				continue
+			}
+
+			// Check if IP is assigned and instance is active
+			if instanceData.Instance.MainIP != "" && instanceData.Instance.Status == "active" {
+				finalIP = instanceData.Instance.MainIP
+				ui.FinishSpinner(spinnerProg, true, "")
+				return
+			}
+
+			// Update spinner message with current status
+			ui.UpdateSpinnerMessage(spinnerProg, "Status: "+instanceData.Instance.Status+" - Still waiting for IP...")
+			time.Sleep(checkInterval)
+		}
+
+		// Timeout reached
+		ui.FinishSpinner(spinnerProg, false, "Timeout waiting for IP assignment")
+	}()
+
+	// Wait for the spinner to complete
+	<-doneChan
+
+	if finalIP == "" {
+		finalIP = "pending"
+	}
+
+	// Output the IP using logger
+	logger.Info("Instance IP: " + logger.Highlight(finalIP))
+
 	vps := VultrInstanceRecord{
 		Creation_Time:   parsed.Instance.DateCreated,
 		Id:              parsed.Instance.ID,
-		Host_Image:      parsed.Instance.OS,
-		Ipv4:            parsed.Instance.MainIP,
+		Host_Image:      strconv.Itoa(osID),
+		Ipv4:            finalIP,
 		Label:           parsed.Instance.Label,
 		Region:          parsed.Instance.Region,
 		Type:            parsed.Instance.Plan,
 		SSHKeyID:        sshKeyID,
 		PrivKeyPath:     privKeyPath,
 		DefaultPassword: parsed.Instance.DefaultPassword,
+		Provider:        "Vultr",
 	}
 
 	var all VultrInstancesToml
-	if _, err := os.Stat(vultrInstanceFile); err == nil {
-		if _, err := toml.DecodeFile(vultrInstanceFile, &all); err != nil {
-			logger.Warn("Could not decode existing Vultr instances file, starting fresh: " + err.Error())
+	if _, err := os.Stat(instanceFile); err == nil {
+		if _, err := toml.DecodeFile(instanceFile, &all); err != nil {
+			logger.Warn("Could not decode existing instances file, starting fresh: " + err.Error())
 			all = make(VultrInstancesToml)
 		}
 	} else {
@@ -413,12 +495,12 @@ func CreateVultrInstance(providerKey string, sshKeyID string, privKeyPath string
 	}
 
 	all[parsed.Instance.ID] = vps
-	f, _ := os.Create(vultrInstanceFile)
+	f, _ := os.Create(instanceFile)
 	defer f.Close()
 	if err := toml.NewEncoder(f).Encode(all); err != nil {
 		return "", err
 	}
-	logger.Info("Updated VPS instance file: " + logger.Highlight(vultrInstanceFile))
+	logger.Info("Updated VPS instance file with IP: " + logger.Highlight(instanceFile))
 	return parsed.Instance.ID, nil
 }
 
@@ -517,19 +599,18 @@ func SelectVultrInstance(providerKey string) ([]VultrInstance, error) {
 }
 
 func DestroyVultr(providerKey string, instanceID string, instanceFile string) error {
-	// Use separate instance file for Vultr
-	vultrInstanceFile := strings.Replace(instanceFile, "instances.toml", "vultr-instances.toml", 1)
-
 	if providerKey == "" {
 		return logger.Errorf("Provider key is empty")
 	}
 
 	// Load Vultr instances to get SSH key ID before deleting
 	var instances VultrInstancesToml
-	if _, err := os.Stat(vultrInstanceFile); err == nil {
-		if _, err := toml.DecodeFile(vultrInstanceFile, &instances); err != nil {
-			logger.Warn("Could not load Vultr instances file: " + err.Error())
+	if _, err := os.Stat(instanceFile); err == nil {
+		if _, err := toml.DecodeFile(instanceFile, &instances); err != nil {
+			return logger.Errorf("Failed to load instances file: %v", err)
 		}
+	} else {
+		return logger.Errorf("No instances file found")
 	}
 
 	// Get SSH key ID for cleanup
@@ -556,7 +637,7 @@ func DestroyVultr(providerKey string, instanceID string, instanceFile string) er
 	// Remove from local instances file
 	if len(instances) > 0 {
 		delete(instances, instanceID)
-		f, err := os.Create(vultrInstanceFile)
+		f, err := os.Create(instanceFile)
 		if err != nil {
 			return err
 		}
@@ -564,14 +645,14 @@ func DestroyVultr(providerKey string, instanceID string, instanceFile string) er
 		if err := toml.NewEncoder(f).Encode(instances); err != nil {
 			return err
 		}
-		logger.Info("Updated VPS instance file: " + logger.Highlight(vultrInstanceFile))
+		logger.Info("Updated VPS instance file: " + logger.Highlight(instanceFile))
 	}
 
 	logger.Info("Successfully destroyed Vultr instance: " + logger.Highlight(instanceID))
 	return nil
 }
 
-func ListVultrInstancesTable(providerKey string) (string, error) {
+func ListVultrInstancesTable(providerKey string, instanceFile string) (string, error) {
 	if providerKey == "" {
 		return "", logger.Errorf("Provider key is empty")
 	}
@@ -581,22 +662,84 @@ func ListVultrInstancesTable(providerKey string) (string, error) {
 		return "", err
 	}
 
-	if len(instances) == 0 {
-		logger.Info("No instances found")
-		return "", nil
+	// Cache regions for verbose display
+	regionCache := make(map[string]string)
+	regions, err := GetVultrRegions(providerKey)
+	if err == nil {
+		for _, region := range regions {
+			regionCache[region.ID] = region.ID + " - " + region.City + ", " + region.Country
+		}
+	}
+
+	//	if len(instances) == 0 {
+	//		logger.Info("No instances found")
+	//		return "", nil
+	//	}
+
+	// Load existing instances from TOML file to check/update IP addresses
+	var storedInstances VultrInstancesToml
+	var hasChanges bool
+
+	if _, err := os.Stat(instanceFile); err == nil {
+		if _, err := toml.DecodeFile(instanceFile, &storedInstances); err != nil {
+			logger.Warn("Failed to load instances file for IP sync: " + err.Error())
+			storedInstances = make(VultrInstancesToml)
+		}
+	} else {
+		storedInstances = make(VultrInstancesToml)
 	}
 
 	var rows [][]string
 	for _, instance := range instances {
+		// Check if we need to update the stored instance with current IP
+		if storedInstance, exists := storedInstances[instance.ID]; exists {
+			if storedInstance.Ipv4 != instance.MainIP && instance.MainIP != "" {
+				// Update the stored instance with new IP
+				storedInstance.Ipv4 = instance.MainIP
+				storedInstances[instance.ID] = storedInstance
+				hasChanges = true
+				logger.Info("Updated IP for Vultr instance " + logger.Highlight(instance.ID) + ": " + logger.Highlight(instance.MainIP))
+			}
+		}
+
+		// Get verbose region name
+		regionDisplay := instance.Region
+		if verboseRegion, exists := regionCache[instance.Region]; exists {
+			regionDisplay = verboseRegion
+		}
+
 		rows = append(rows, []string{
 			instance.ID,
 			instance.MainIP,
-			instance.Region,
+			regionDisplay,
 			instance.OS,
 			instance.Plan,
 			instance.DateCreated,
 			instance.Status,
 		})
+	}
+
+	// Write back the instances file if we made changes
+	if hasChanges {
+		tmp := instanceFile + ".tmp"
+		f, err := os.Create(tmp)
+		if err != nil {
+			logger.Warn("Failed to create temp file for IP sync: " + err.Error())
+		} else {
+			if err := toml.NewEncoder(f).Encode(storedInstances); err != nil {
+				_ = f.Close()
+				_ = os.Remove(tmp)
+				logger.Warn("Failed to encode updated instances: " + err.Error())
+			} else if err := f.Close(); err != nil {
+				_ = os.Remove(tmp)
+				logger.Warn("Failed to close temp instances file: " + err.Error())
+			} else if err := os.Rename(tmp, instanceFile); err != nil {
+				_ = os.Remove(tmp)
+				logger.Warn("Failed to update instances file: " + err.Error())
+			} else {
+				logger.Success("Synced IP addresses to instances file")
+			}
+		}
 	}
 
 	fmt.Println(ui.InstanceTable(rows))
