@@ -2,6 +2,7 @@ package providers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/emancipat3r/vps3/logger"
@@ -251,13 +253,14 @@ type linodeResponseJSONBytes struct {
 type LinodeInstance struct {
 	Creation_Time string `toml:"created"`
 	Host_UUID     string `toml:"host_uuid"`
-	Id            int    `toml:"id"`
+	Id            string `toml:"id"`
 	Host_Image    string `toml:"image"`
 	Ipv4          string `toml:"ipv4"`
 	Ipv6          string `toml:"ipv6"`
 	Label         string `toml:"label"`
 	Region        string `toml:"region"`
 	Type          string `toml:"type"`
+	Provider      string `toml:"provider"`
 }
 
 type LinodeInstancesToml map[string]LinodeInstance
@@ -319,16 +322,99 @@ func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, in
 		return "", logger.Errorf("Unexpected status code: %s | %s", strconv.Itoa(response.StatusCode), string(responseBytes))
 	}
 
+	logger.Info("Instance created with ID: " + logger.Highlight(strconv.Itoa(parsedResponseBytes.Id)))
+
+	// Start the spinner
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	spinnerProg, doneChan := ui.IPWaitSpinner(ctx, "Waiting for IP address assignment...")
+
+	// Wait for IP address to be assigned
+	var finalIP string
+	maxWaitTime := 5 * time.Minute
+	checkInterval := 10 * time.Second
+	startTime := time.Now()
+
+	go func() {
+		defer close(doneChan)
+
+		for time.Since(startTime) < maxWaitTime {
+			// Get current instance details
+			instanceReq, err := http.NewRequest("GET", "https://api.linode.com/v4/linode/instances/"+strconv.Itoa(parsedResponseBytes.Id), nil)
+			if err != nil {
+				time.Sleep(checkInterval)
+				continue
+			}
+			instanceReq.Header.Set("Authorization", "Bearer "+providerKey)
+			instanceReq.Header.Set("Accept", "application/json")
+
+			instanceResp, err := client.Do(instanceReq)
+			if err != nil {
+				time.Sleep(checkInterval)
+				continue
+			}
+
+			instanceRb, err := io.ReadAll(instanceResp.Body)
+			instanceResp.Body.Close()
+
+			if err != nil {
+				time.Sleep(checkInterval)
+				continue
+			}
+
+			if instanceResp.StatusCode != http.StatusOK {
+				time.Sleep(checkInterval)
+				continue
+			}
+
+			var instanceData linodeResponseJSONBytes
+			if err := json.Unmarshal(instanceRb, &instanceData); err != nil {
+				time.Sleep(checkInterval)
+				continue
+			}
+
+			// Check if IP is assigned and we have a public IP
+			if len(instanceData.Ipv4) > 0 && instanceData.Ipv4[0] != "" {
+				finalIP = instanceData.Ipv4[0]
+				ui.FinishSpinner(spinnerProg, true, "")
+				return
+			}
+
+			// Update spinner message
+			ui.UpdateSpinnerMessage(spinnerProg, "Still waiting for IP assignment...")
+			time.Sleep(checkInterval)
+		}
+
+		// Timeout reached
+		ui.FinishSpinner(spinnerProg, false, "Timeout waiting for IP assignment")
+	}()
+
+	// Wait for the spinner to complete
+	<-doneChan
+
+	if finalIP == "" {
+		if len(parsedResponseBytes.Ipv4) > 0 {
+			finalIP = parsedResponseBytes.Ipv4[0]
+		} else {
+			finalIP = "pending"
+		}
+	}
+
+	// Output the IP using logger
+	logger.Info("Instance IP: " + logger.Highlight(finalIP))
+
 	VPS := LinodeInstance{
 		Creation_Time: parsedResponseBytes.Creation_Time,
 		Host_UUID:     parsedResponseBytes.Host_UUID,
-		Id:            parsedResponseBytes.Id,
+		Id:            strconv.Itoa(parsedResponseBytes.Id),
 		Host_Image:    parsedResponseBytes.Host_Image,
-		Ipv4:          parsedResponseBytes.Ipv4[0],
+		Ipv4:          finalIP,
 		Ipv6:          parsedResponseBytes.Ipv6,
 		Label:         parsedResponseBytes.Label,
 		Region:        parsedResponseBytes.Region,
 		Type:          parsedResponseBytes.Type,
+		Provider:      "Linode",
 	}
 
 	var allinstances LinodeInstancesToml
@@ -342,8 +428,7 @@ func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, in
 		allinstances = make(LinodeInstancesToml)
 	}
 
-	vpsIDStr := strconv.Itoa(VPS.Id)
-	allinstances[vpsIDStr] = VPS
+	allinstances[VPS.Id] = VPS
 
 	f, err := os.Create(instanceFile)
 	if err != nil {
@@ -356,7 +441,7 @@ func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, in
 		return "", err
 	}
 
-	logger.Info("Updated VPS instance file: " + logger.Highlight(instanceFile))
+	logger.Info("Updated VPS instance file with IP: " + logger.Highlight(instanceFile))
 
 	return "", nil
 }
@@ -379,7 +464,7 @@ type linodeListResponse struct {
 	Results int                 `json:"results"`
 }
 
-func ListLinodeInstancesTable(providerKey string) (string, error) {
+func ListLinodeInstancesTable(providerKey string, instanceFile string) (string, error) {
 	if providerKey == "" {
 		return "", logger.Errorf("Provider key is empty")
 	}
@@ -415,17 +500,85 @@ func ListLinodeInstancesTable(providerKey string) (string, error) {
 		return "", logger.Errorf("Unexpected status code: %d | %s", resp.StatusCode, string(bodyBytes))
 	}
 
+	// Cache regions for verbose display
+	regionCache := make(map[string]string)
+	regions, err := GetLinodeRegions()
+	if err == nil {
+		for _, region := range regions {
+			regionCache[region.ID] = region.ID + " - " + region.Label
+		}
+	}
+
+	// Load existing instances from TOML file to check/update IP addresses
+	var storedInstances LinodeInstancesToml
+	var hasChanges bool
+
+	if _, err := os.Stat(instanceFile); err == nil {
+		if _, err := toml.DecodeFile(instanceFile, &storedInstances); err != nil {
+			logger.Warn("Failed to load instances file for IP sync: " + err.Error())
+			storedInstances = make(LinodeInstancesToml)
+		}
+	} else {
+		storedInstances = make(LinodeInstancesToml)
+	}
+
 	var rows [][]string
 	for _, inst := range parsedResponseBytes.Data {
+		ipv4 := ""
+		if len(inst.Ipv4) > 0 {
+			ipv4 = inst.Ipv4[0]
+		}
+
+		// Check if we need to update the stored instance with current IP
+		instanceIDStr := strconv.Itoa(inst.Id)
+		if storedInstance, exists := storedInstances[instanceIDStr]; exists {
+			if storedInstance.Ipv4 != ipv4 && ipv4 != "" {
+				// Update the stored instance with new IP
+				storedInstance.Ipv4 = ipv4
+				storedInstances[instanceIDStr] = storedInstance
+				hasChanges = true
+				logger.Info("Updated IP for Linode instance " + logger.Highlight(instanceIDStr) + ": " + logger.Highlight(ipv4))
+			}
+		}
+
+		// Get verbose region name
+		regionDisplay := inst.Region
+		if verboseRegion, exists := regionCache[inst.Region]; exists {
+			regionDisplay = verboseRegion
+		}
+
 		rows = append(rows, []string{
-			fmt.Sprintf("%d", inst.Id),
-			fmt.Sprintf("%v", inst.Ipv4[0]),
-			inst.Region,
+			strconv.Itoa(inst.Id),
+			ipv4,
+			regionDisplay,
 			inst.Host_Image,
 			inst.Type,
 			inst.Creation_Time,
 			inst.Status,
 		})
+	}
+
+	// Write back the instances file if we made changes
+	if hasChanges {
+		tmp := instanceFile + ".tmp"
+		f, err := os.Create(tmp)
+		if err != nil {
+			logger.Warn("Failed to create temp file for IP sync: " + err.Error())
+		} else {
+			if err := toml.NewEncoder(f).Encode(storedInstances); err != nil {
+				_ = f.Close()
+				_ = os.Remove(tmp)
+				logger.Warn("Failed to encode updated instances: " + err.Error())
+			} else if err := f.Close(); err != nil {
+				_ = os.Remove(tmp)
+				logger.Warn("Failed to close temp instances file: " + err.Error())
+			} else if err := os.Rename(tmp, instanceFile); err != nil {
+				_ = os.Remove(tmp)
+				logger.Warn("Failed to update instances file: " + err.Error())
+			} else {
+				logger.Success("Synced IP addresses to instances file")
+			}
+		}
 	}
 
 	fmt.Println(ui.InstanceTable(rows))
@@ -526,7 +679,7 @@ func DeleteByTableName(instanceFile string, instanceID ...string) error {
 	return os.Rename(tmp, instanceFile)
 }
 
-func DestroyLinode(providerKey, instanceID, instanceFile string) (string, error) {
+func DestroyLinode(providerKey, instanceID string) (string, error) {
 	if providerKey == "" {
 		return "", logger.Errorf("Provider key is empty")
 	}
@@ -546,13 +699,6 @@ func DestroyLinode(providerKey, instanceID, instanceFile string) (string, error)
 	defer resp.Body.Close()
 
 	logger.Success("Deleted Linode instance: " + logger.Highlight(instanceID))
-
-	// remove instanceID table in instance toml file
-	err = DeleteByTableName(instanceFile, instanceID)
-
-	if err != nil {
-		return "", logger.Errorf("Failed to update the instanceFile: %s", instanceFile)
-	}
 
 	return "", nil
 

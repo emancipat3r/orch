@@ -146,10 +146,23 @@ var destroyCmd = &cobra.Command{
 				return
 			}
 
+			// Get regions for verbose display
+			regions, err := providers.GetVultrRegions(providerKey)
+			regionCache := make(map[string]string)
+			if err == nil {
+				for _, region := range regions {
+					regionCache[region.ID] = region.ID + " - " + region.City + ", " + region.Country
+				}
+			}
+
 			var instanceOptions []string
 
 			for _, instance := range instances {
-				instanceOptions = append(instanceOptions, instance.DateCreated+" - "+instance.ID+" - "+instance.OS+" - "+instance.MainIP+" - "+instance.Region)
+				regionDisplay := instance.Region
+				if verboseRegion, exists := regionCache[instance.Region]; exists {
+					regionDisplay = verboseRegion
+				}
+				instanceOptions = append(instanceOptions, instance.DateCreated+" - "+instance.ID+" - "+instance.OS+" - "+instance.MainIP+" - "+regionDisplay)
 			}
 
 			selectedInstance := ui.Select("Select the instance:", instanceOptions)

@@ -7,14 +7,12 @@ import (
 
 func InstanceTable(rows [][]string) string {
 	var (
-		purple    = lipgloss.Color("99")
-		gray      = lipgloss.Color("245")
-		lightGray = lipgloss.Color("241")
+		purple = lipgloss.Color("99")
+		gray   = lipgloss.Color("245")
 
-		headerStyle  = lipgloss.NewStyle().Foreground(purple).Bold(true).Align(lipgloss.Center)
-		cellStyle    = lipgloss.NewStyle().Padding(0, 1).Width(14)
-		oddRowStyle  = cellStyle.Foreground(gray)
-		evenRowStyle = cellStyle.Foreground(lightGray)
+		headerStyle = lipgloss.NewStyle().Foreground(purple).Bold(true).Align(lipgloss.Center)
+		cellStyle   = lipgloss.NewStyle().Padding(0, 1).Width(14)
+		rowStyle    = cellStyle.Foreground(gray)
 	)
 
 	t := table.New()
@@ -27,10 +25,8 @@ func InstanceTable(rows [][]string) string {
 		switch {
 		case row == table.HeaderRow:
 			return headerStyle
-		case row%2 == 0:
-			return evenRowStyle
 		default:
-			return oddRowStyle
+			return rowStyle
 		}
 	})
 

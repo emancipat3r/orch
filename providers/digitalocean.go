@@ -2,6 +2,7 @@ package providers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -336,14 +337,15 @@ type DOCreateResponse struct {
 
 type DOInstance struct {
 	Creation_Time string `toml:"created"`
-	Id            int    `toml:"id"`
+	Id            string `toml:"id"`
 	Host_Image    string `toml:"image"`
 	Ipv4          string `toml:"ipv4"`
 	Label         string `toml:"label"`
 	Region        string `toml:"region"`
 	Type          string `toml:"type"`
-	KeyID         int    `toml:"key_id"`
+	KeyID         string `toml:"key_id"`
 	PrivKeyPath   string `toml:"priv_key_path"`
+	Provider      string `toml:"provider"`
 }
 
 type DOInstancesToml map[string]DOInstance
@@ -386,24 +388,118 @@ func CreateDroplet(providerKey string, sshKeyID int, privKeyPath, image, region,
 		return "", err
 	}
 
-	ipv4 := ""
-	for _, v := range parsed.Droplet.Networks.V4 {
-		if v.Type == "public" {
-			ipv4 = v.IPAddress
-			break
+	logger.Info("Droplet created with ID: " + logger.Highlight(strconv.Itoa(parsed.Droplet.ID)))
+
+	// Start the spinner
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	spinnerProg, doneChan := ui.IPWaitSpinner(ctx, "Waiting for IP address assignment...")
+
+	// Wait for IP address to be assigned
+	var finalIP string
+	maxWaitTime := 5 * time.Minute
+	checkInterval := 10 * time.Second
+	startTime := time.Now()
+
+	go func() {
+		defer close(doneChan)
+
+		for time.Since(startTime) < maxWaitTime {
+			// Get current droplet details
+			dropletReq, err := http.NewRequest("GET", "https://api.digitalocean.com/v2/droplets/"+strconv.Itoa(parsed.Droplet.ID), nil)
+			if err != nil {
+				time.Sleep(checkInterval)
+				continue
+			}
+			dropletReq.Header.Set("Authorization", "Bearer "+providerKey)
+			dropletReq.Header.Set("Accept", "application/json")
+
+			dropletResp, err := http.DefaultClient.Do(dropletReq)
+			if err != nil {
+				time.Sleep(checkInterval)
+				continue
+			}
+
+			dropletRb, err := io.ReadAll(dropletResp.Body)
+			dropletResp.Body.Close()
+
+			if err != nil {
+				time.Sleep(checkInterval)
+				continue
+			}
+
+			if dropletResp.StatusCode != http.StatusOK {
+				time.Sleep(checkInterval)
+				continue
+			}
+
+			var dropletData struct {
+				Droplet struct {
+					ID       int    `json:"id"`
+					Status   string `json:"status"`
+					Networks struct {
+						V4 []struct {
+							IPAddress string `json:"ip_address"`
+							Type      string `json:"type"`
+						} `json:"v4"`
+					} `json:"networks"`
+				} `json:"droplet"`
+			}
+
+			if err := json.Unmarshal(dropletRb, &dropletData); err != nil {
+				time.Sleep(checkInterval)
+				continue
+			}
+
+			// Check if IP is assigned and droplet is active
+			for _, v4 := range dropletData.Droplet.Networks.V4 {
+				if v4.Type == "public" && v4.IPAddress != "" && dropletData.Droplet.Status == "active" {
+					finalIP = v4.IPAddress
+					ui.FinishSpinner(spinnerProg, true, "")
+					return
+				}
+			}
+
+			// Update spinner message with current status
+			ui.UpdateSpinnerMessage(spinnerProg, "Waiting for IP address assignment...")
+			time.Sleep(checkInterval)
+		}
+
+		// Timeout reached
+		ui.FinishSpinner(spinnerProg, false, "Timeout waiting for IP assignment")
+	}()
+
+	// Wait for the spinner to complete
+	<-doneChan
+
+	if finalIP == "" {
+		// Try to get IP from initial response as fallback
+		for _, v := range parsed.Droplet.Networks.V4 {
+			if v.Type == "public" {
+				finalIP = v.IPAddress
+				break
+			}
+		}
+		if finalIP == "" {
+			finalIP = "pending"
 		}
 	}
 
+	// Output the IP using logger
+	logger.Info("Instance IP: " + logger.Highlight(finalIP))
+
 	vps := DOInstance{
 		Creation_Time: parsed.Droplet.CreatedAt,
-		Id:            parsed.Droplet.ID,
+		Id:            strconv.Itoa(parsed.Droplet.ID),
 		Host_Image:    parsed.Droplet.Image.Slug,
-		Ipv4:          ipv4,
+		Ipv4:          finalIP,
 		Label:         parsed.Droplet.Name,
 		Region:        parsed.Droplet.Region.Slug,
 		Type:          parsed.Droplet.SizeSlug,
-		KeyID:         sshKeyID,
+		KeyID:         strconv.Itoa(sshKeyID),
 		PrivKeyPath:   privKeyPath,
+		Provider:      "DigitalOcean",
 	}
 
 	var all DOInstancesToml
@@ -415,15 +511,14 @@ func CreateDroplet(providerKey string, sshKeyID int, privKeyPath, image, region,
 		all = make(DOInstancesToml)
 	}
 
-	idStr := strconv.Itoa(vps.Id)
-	all[idStr] = vps
+	all[vps.Id] = vps
 	f, _ := os.Create(instanceFile)
 	defer f.Close()
 	if err := toml.NewEncoder(f).Encode(all); err != nil {
 		return "", err
 	}
-	logger.Info("Updated VPS instance file: " + logger.Highlight(instanceFile))
-	return idStr, nil
+	logger.Info("Updated VPS instance file with IP: " + logger.Highlight(instanceFile))
+	return vps.Id, nil
 }
 
 func DeleteDOSSHKey(providerKey string, keyID int) error {
@@ -544,13 +639,18 @@ func DestroyDroplet(providerKey, instanceID, instanceFile string) (string, error
 	logger.Success("Deleted droplet: " + logger.Highlight(instanceID))
 
 	// Delete the SSH key from DigitalOcean
-	if instance.KeyID != 0 {
-		err = DeleteDOSSHKey(providerKey, instance.KeyID)
+	if instance.KeyID != "" && instance.KeyID != "0" {
+		keyID, err := strconv.Atoi(instance.KeyID)
 		if err != nil {
-			logger.Warn("Failed to delete SSH key from DigitalOcean: " + err.Error())
-			// Don't return error here as droplet is already deleted
+			logger.Warn("Invalid SSH key ID format: " + instance.KeyID)
 		} else {
-			logger.Success("Deleted SSH key: " + logger.Highlight(strconv.Itoa(instance.KeyID)))
+			err = DeleteDOSSHKey(providerKey, keyID)
+			if err != nil {
+				logger.Warn("Failed to delete SSH key from DigitalOcean: " + err.Error())
+				// Don't return error here as droplet is already deleted
+			} else {
+				logger.Success("Deleted SSH key: " + logger.Highlight(instance.KeyID))
+			}
 		}
 	}
 
@@ -681,9 +781,9 @@ func ListDOInstancesTable(providerKey string) (string, error) {
 		}
 
 		rows = append(rows, []string{
-			fmt.Sprintf("%d", inst.Id),
+			strconv.Itoa(inst.Id),
 			ipv4,
-			inst.Region.Name + " - " + inst.Region.Slug,
+			inst.Region.Slug + " - " + inst.Region.Name,
 			imageName,
 			inst.Size.Slug,
 			inst.Creation_Time,
