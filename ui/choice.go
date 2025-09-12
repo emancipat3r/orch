@@ -7,15 +7,22 @@ import (
 func ChoiceProvider() string {
 	var provider string
 
-	huh.NewSelect[string]().
-		Title("Select your provider").
-		Options(
-			huh.NewOption("DigitalOcean", "DigitalOcean"),
-			huh.NewOption("Linode", "Linode"),
-			huh.NewOption("Vultr", "Vultr"),
-		).
-		Value(&provider).
-		Run()
+	err := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Select your provider").
+				Options(
+					huh.NewOption("DigitalOcean", "DigitalOcean"),
+					huh.NewOption("Linode", "Linode"),
+					huh.NewOption("Vultr", "Vultr"),
+				).
+				Value(&provider),
+		),
+	).Run()
+
+	if err != nil {
+		return ""
+	}
 
 	return provider
 }

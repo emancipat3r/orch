@@ -78,17 +78,11 @@ func (m SpinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m SpinnerModel) View() string {
 	if m.quitting {
-		return "\n"
+		return ""
 	}
 
 	if m.done {
-		if m.success {
-			if m.finalMsg == "" {
-				return ""
-			}
-			return fmt.Sprintf("✓ %s\n", m.finalMsg)
-		}
-		return fmt.Sprintf("✗ %s\n", m.finalMsg)
+		return ""
 	}
 
 	str := fmt.Sprintf("%s %s",
@@ -99,7 +93,7 @@ func (m SpinnerModel) View() string {
 
 func NewSpinnerModel(message string) SpinnerModel {
 	s := spinner.New()
-	s.Spinner = spinner.Dot
+	s.Spinner = spinner.Jump
 	s.Style = spinnerStyle
 
 	return SpinnerModel{

@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -452,7 +454,7 @@ func CreateVultrInstance(providerKey string, sshKeyID string, privKeyPath string
 			}
 
 			// Update spinner message with current status
-			ui.UpdateSpinnerMessage(spinnerProg, "Status: "+instanceData.Instance.Status+" - Still waiting for IP...")
+			ui.UpdateSpinnerMessage(spinnerProg, "Status: Waiting for IP address assignment..")
 			time.Sleep(checkInterval)
 		}
 
@@ -466,6 +468,9 @@ func CreateVultrInstance(providerKey string, sshKeyID string, privKeyPath string
 	if finalIP == "" {
 		finalIP = "pending"
 	}
+
+	// Add small delay to ensure spinner is fully cleared
+	time.Sleep(100 * time.Millisecond)
 
 	// Output the IP using logger
 	logger.Info("Instance IP: " + logger.Highlight(finalIP))
@@ -613,10 +618,12 @@ func DestroyVultr(providerKey string, instanceID string, instanceFile string) er
 		return logger.Errorf("No instances file found")
 	}
 
-	// Get SSH key ID for cleanup
+	// Get SSH key ID and private key path for cleanup
 	var sshKeyID string
+	var privKeyPath string
 	if instance, exists := instances[instanceID]; exists {
 		sshKeyID = instance.SSHKeyID
+		privKeyPath = instance.PrivKeyPath
 	}
 
 	// Delete the instance
@@ -631,6 +638,24 @@ func DestroyVultr(providerKey string, instanceID string, instanceFile string) er
 			logger.Warn("Failed to delete SSH key: " + err.Error())
 		} else {
 			logger.Info("Cleaned up SSH key: " + logger.Highlight(sshKeyID))
+		}
+	}
+
+	// Delete the private key file if it exists
+	if privKeyPath != "" {
+		if err := os.Remove(privKeyPath); err != nil {
+			logger.Warn("Failed to delete private key file: " + err.Error())
+		} else {
+			logger.Info("Deleted private key file: " + logger.Highlight(privKeyPath))
+		}
+
+		// Also try to delete the passphrase file
+		passPhraseFile := strings.Replace(privKeyPath, "/.ssh/", "/.secrets/", 1)
+		passPhraseFile = strings.TrimSuffix(passPhraseFile, filepath.Ext(passPhraseFile)) + ".pass"
+		if err := os.Remove(passPhraseFile); err != nil {
+			// Don't warn about this as it might not exist
+		} else {
+			logger.Info("Deleted passphrase file: " + logger.Highlight(passPhraseFile))
 		}
 	}
 
@@ -737,7 +762,7 @@ func ListVultrInstancesTable(providerKey string, instanceFile string) (string, e
 				_ = os.Remove(tmp)
 				logger.Warn("Failed to update instances file: " + err.Error())
 			} else {
-				logger.Success("Synced IP addresses to instances file")
+				logger.Info("Synced IP addresses to instances file")
 			}
 		}
 	}
