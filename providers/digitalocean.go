@@ -486,6 +486,9 @@ func CreateDroplet(providerKey string, sshKeyID int, privKeyPath, image, region,
 		}
 	}
 
+	// Add small delay to ensure spinner is fully cleared
+	time.Sleep(100 * time.Millisecond)
+
 	// Output the IP using logger
 	logger.Info("Instance IP: " + logger.Highlight(finalIP))
 
@@ -636,7 +639,7 @@ func DestroyDroplet(providerKey, instanceID, instanceFile string) (string, error
 	}
 	defer resp.Body.Close()
 
-	logger.Success("Deleted droplet: " + logger.Highlight(instanceID))
+	logger.Info("Deleted droplet: " + logger.Highlight(instanceID))
 
 	// Delete the SSH key from DigitalOcean
 	if instance.KeyID != "" && instance.KeyID != "0" {
@@ -649,7 +652,7 @@ func DestroyDroplet(providerKey, instanceID, instanceFile string) (string, error
 				logger.Warn("Failed to delete SSH key from DigitalOcean: " + err.Error())
 				// Don't return error here as droplet is already deleted
 			} else {
-				logger.Success("Deleted SSH key: " + logger.Highlight(instance.KeyID))
+				logger.Info("Deleted SSH key: " + logger.Highlight(instance.KeyID))
 			}
 		}
 	}
@@ -659,7 +662,7 @@ func DestroyDroplet(providerKey, instanceID, instanceFile string) (string, error
 		if err := os.Remove(instance.PrivKeyPath); err != nil {
 			logger.Warn("Failed to delete private key file: " + err.Error())
 		} else {
-			logger.Success("Deleted private key file: " + logger.Highlight(instance.PrivKeyPath))
+			logger.Info("Deleted private key file: " + logger.Highlight(instance.PrivKeyPath))
 		}
 
 		// Also try to delete the passphrase file
@@ -668,7 +671,7 @@ func DestroyDroplet(providerKey, instanceID, instanceFile string) (string, error
 		if err := os.Remove(passPhraseFile); err != nil {
 			// Don't warn about this as it might not exist
 		} else {
-			logger.Success("Deleted passphrase file: " + logger.Highlight(passPhraseFile))
+			logger.Info("Deleted passphrase file: " + logger.Highlight(passPhraseFile))
 		}
 	}
 
@@ -698,7 +701,7 @@ func DestroyDroplet(providerKey, instanceID, instanceFile string) (string, error
 		return "", logger.Errorf("Failed to rename tmp instance file: %v", err)
 	}
 
-	logger.Success("Updated instance file: " + logger.Highlight(instanceFile))
+	logger.Info("Updated instance file: " + logger.Highlight(instanceFile))
 
 	return "", nil
 }
@@ -809,7 +812,7 @@ func ListDOInstancesTable(providerKey string) (string, error) {
 				_ = os.Remove(tmp)
 				logger.Warn("Failed to update instances file: " + err.Error())
 			} else {
-				logger.Success("Synced IP addresses to instances file")
+				logger.Info("Synced IP addresses to instances file")
 			}
 		}
 	}

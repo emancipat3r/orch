@@ -2,9 +2,11 @@ package cmd
 
 import (
 	"os"
+	"os/signal"
 	"os/user"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/emancipat3r/vps3/logger"
 	"github.com/emancipat3r/vps3/providers"
@@ -14,9 +16,23 @@ import (
 
 var destroyCmd = &cobra.Command{
 	Use:   "destroy",
-	Short: "Destroy a VPS instance",
+	Short: "Destroy VPS instance(s)",
 	Run: func(cmd *cobra.Command, args []string) {
+		// Set up signal handling for graceful shutdown
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+		go func() {
+			<-sigChan
+			logger.Info("\nOperation cancelled by user (Ctrl+C)")
+			os.Exit(0)
+		}()
+
 		provider := ui.ChoiceProvider()
+		if provider == "" {
+			logger.Info("Operation cancelled by user.")
+			return
+		}
 		user, err := user.Current()
 		if err != nil {
 			logger.Error("Failed to get current user: " + err.Error())
@@ -54,23 +70,40 @@ var destroyCmd = &cobra.Command{
 				instanceOptions = append(instanceOptions, instance.Creation_Time+" - "+strconv.Itoa(instance.Id)+" - "+instance.Host_Image+" - "+instance.Ipv4[0]+" - "+instance.Region)
 			}
 
-			selectedInstance := ui.Select("Select the instance:", instanceOptions)
-			logger.Info("You selected instance: " + logger.Highlight(selectedInstance))
-			choice := ui.Confirm("Are you sure you want to proceed?")
-
-			if choice == false {
-				os.Exit(1)
+			selectedInstances := ui.MultiSelect("Select the instance(s) to destroy:", instanceOptions)
+			if len(selectedInstances) == 0 {
+				logger.Info("No instances selected. Exiting...")
+				return
 			}
 
-			selectedInstanceSplit := strings.Split(selectedInstance, " ")
-
-			logger.Info("Destroying Linode: " + logger.Highlight(selectedInstanceSplit[2]))
-
-			providers.DestroyLinode(providerKey, selectedInstanceSplit[2], instanceFile)
-
-			if err != nil {
-				logger.Error("Failed to destroy Linode: " + err.Error())
+			logger.Info("You selected " + strconv.Itoa(len(selectedInstances)) + " instance(s) for destruction")
+			for _, instance := range selectedInstances {
+				logger.Info("  - " + logger.Highlight(instance))
 			}
+
+			choice := ui.Confirm("Are you sure you want to proceed with destroying " + strconv.Itoa(len(selectedInstances)) + " instance(s)?")
+
+			if !choice {
+				logger.Info("Destruction cancelled by user.")
+				return
+			}
+
+			for i, selectedInstance := range selectedInstances {
+				selectedInstanceSplit := strings.Split(selectedInstance, " ")
+				instanceID := selectedInstanceSplit[2]
+
+				logger.Info("(" + strconv.Itoa(i+1) + "/" + strconv.Itoa(len(selectedInstances)) + ") Destroying Linode: " + logger.Highlight(instanceID))
+
+				_, err = providers.DestroyLinode(providerKey, instanceID, instanceFile)
+
+				if err != nil {
+					logger.Error("Failed to destroy Linode " + instanceID + ": " + err.Error())
+				} else {
+					logger.Info("Successfully destroyed Linode: " + logger.Highlight(instanceID))
+				}
+			}
+
+			logger.Info("Completed destruction of " + strconv.Itoa(len(selectedInstances)) + " Linode instance(s)")
 
 		case "DigitalOcean":
 			providerKey := providers.GetDOAPIKey(configFile, provider)
@@ -112,23 +145,40 @@ var destroyCmd = &cobra.Command{
 				instanceOptions = append(instanceOptions, instance.Creation_Time+" - "+strconv.Itoa(instance.Id)+" - "+imageName+" - "+ipv4+" - "+instance.Region.Slug)
 			}
 
-			selectedInstance := ui.Select("Select the instance:", instanceOptions)
-			logger.Info("You selected instance: " + logger.Highlight(selectedInstance))
-			choice := ui.Confirm("Are you sure you want to proceed?")
-
-			if choice == false {
-				os.Exit(1)
+			selectedInstances := ui.MultiSelect("Select the instance(s) to destroy:", instanceOptions)
+			if len(selectedInstances) == 0 {
+				logger.Info("No instances selected. Exiting...")
+				return
 			}
 
-			selectedInstanceSplit := strings.Split(selectedInstance, " ")
-
-			logger.Info("Destroying droplet: " + logger.Highlight(selectedInstanceSplit[2]))
-
-			providers.DestroyDroplet(providerKey, selectedInstanceSplit[2], instanceFile)
-
-			if err != nil {
-				logger.Error("Failed to destroy droplet: " + err.Error())
+			logger.Info("You selected " + strconv.Itoa(len(selectedInstances)) + " instance(s) for destruction")
+			for _, instance := range selectedInstances {
+				logger.Info("  - " + logger.Highlight(instance))
 			}
+
+			choice := ui.Confirm("Are you sure you want to proceed with destroying " + strconv.Itoa(len(selectedInstances)) + " instance(s)?")
+
+			if !choice {
+				logger.Info("Destruction cancelled by user.")
+				return
+			}
+
+			for i, selectedInstance := range selectedInstances {
+				selectedInstanceSplit := strings.Split(selectedInstance, " ")
+				instanceID := selectedInstanceSplit[2]
+
+				logger.Info("(" + strconv.Itoa(i+1) + "/" + strconv.Itoa(len(selectedInstances)) + ") Destroying droplet: " + logger.Highlight(instanceID))
+
+				_, err = providers.DestroyDroplet(providerKey, instanceID, instanceFile)
+
+				if err != nil {
+					logger.Error("Failed to destroy droplet " + instanceID + ": " + err.Error())
+				} else {
+					logger.Info("Successfully destroyed droplet: " + logger.Highlight(instanceID))
+				}
+			}
+
+			logger.Info("Completed destruction of " + strconv.Itoa(len(selectedInstances)) + " DigitalOcean instance(s)")
 
 		case "Vultr":
 			providerKey := providers.GetVultrAPIKey(configFile, provider)
@@ -146,7 +196,6 @@ var destroyCmd = &cobra.Command{
 				return
 			}
 
-			// Get regions for verbose display
 			regions, err := providers.GetVultrRegions(providerKey)
 			regionCache := make(map[string]string)
 			if err == nil {
@@ -165,23 +214,40 @@ var destroyCmd = &cobra.Command{
 				instanceOptions = append(instanceOptions, instance.DateCreated+" - "+instance.ID+" - "+instance.OS+" - "+instance.MainIP+" - "+regionDisplay)
 			}
 
-			selectedInstance := ui.Select("Select the instance:", instanceOptions)
-			logger.Info("You selected instance: " + logger.Highlight(selectedInstance))
-			choice := ui.Confirm("Are you sure you want to proceed?")
-
-			if choice == false {
-				os.Exit(1)
+			selectedInstances := ui.MultiSelect("Select the instance(s) to destroy:", instanceOptions)
+			if len(selectedInstances) == 0 {
+				logger.Info("No instances selected. Exiting...")
+				return
 			}
 
-			selectedInstanceSplit := strings.Split(selectedInstance, " ")
-
-			logger.Info("Destroying Vultr instance: " + logger.Highlight(selectedInstanceSplit[2]))
-
-			err = providers.DestroyVultr(providerKey, selectedInstanceSplit[2], instanceFile)
-
-			if err != nil {
-				logger.Error("Failed to destroy Vultr instance: " + err.Error())
+			logger.Info("You selected " + strconv.Itoa(len(selectedInstances)) + " instance(s) for destruction")
+			for _, instance := range selectedInstances {
+				logger.Info("  - " + logger.Highlight(instance))
 			}
+
+			choice := ui.Confirm("Are you sure you want to proceed with destroying " + strconv.Itoa(len(selectedInstances)) + " instance(s)?")
+
+			if !choice {
+				logger.Info("Destruction cancelled by user.")
+				return
+			}
+
+			for i, selectedInstance := range selectedInstances {
+				selectedInstanceSplit := strings.Split(selectedInstance, " ")
+				instanceID := selectedInstanceSplit[2]
+
+				logger.Info("(" + strconv.Itoa(i+1) + "/" + strconv.Itoa(len(selectedInstances)) + ") Destroying Vultr instance: " + logger.Highlight(instanceID))
+
+				err = providers.DestroyVultr(providerKey, instanceID, instanceFile)
+
+				if err != nil {
+					logger.Error("Failed to destroy Vultr instance " + instanceID + ": " + err.Error())
+				} else {
+					logger.Info("Successfully destroyed Vultr instance: " + logger.Highlight(instanceID))
+				}
+			}
+
+			logger.Info("Completed destruction of " + strconv.Itoa(len(selectedInstances)) + " Vultr instance(s)")
 		default:
 			logger.Warn("No provider was selected. Exiting...")
 		}

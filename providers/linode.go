@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -260,28 +261,125 @@ type LinodeInstance struct {
 	Label         string `toml:"label"`
 	Region        string `toml:"region"`
 	Type          string `toml:"type"`
+	SSHKeyID      string `toml:"ssh_key_id"`
+	PrivKeyPath   string `toml:"priv_key_path"`
 	Provider      string `toml:"provider"`
 }
 
-type LinodeInstancesToml map[string]LinodeInstance
+type LinodeInstancesToml = map[string]LinodeInstance
 
-func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, instanceFile string) (string, error) {
+// LinodeSSHKeyRequest for uploading SSH keys
+type LinodeSSHKeyRequest struct {
+	Label  string `json:"label"`
+	SSHKey string `json:"ssh_key"`
+}
+
+// LinodeSSHKeyResponse from SSH key creation
+type LinodeSSHKeyResponse struct {
+	ID     int    `json:"id"`
+	Label  string `json:"label"`
+	SSHKey string `json:"ssh_key"`
+}
+
+// UploadLinodeSSHKey uploads an SSH key to Linode and returns the key ID
+func UploadLinodeSSHKey(providerKey, pubKeyPath string) (int, error) {
 	if providerKey == "" {
-		return "", logger.Errorf("Provider key is empty")
+		return 0, logger.Errorf("Provider key is empty")
 	}
 
 	data, err := os.ReadFile(pubKeyPath)
 	if err != nil {
-		return "", err
+		return 0, err
+	}
+	pubKey := strings.TrimSpace(string(data))
+
+	keyName := "vps3-" + CreateUID()
+	payload := LinodeSSHKeyRequest{
+		Label:  keyName,
+		SSHKey: pubKey,
 	}
 
-	dataString := string(data)
-	dataStringStripped := strings.TrimSpace(dataString)
+	jsonBody, err := json.Marshal(payload)
+	if err != nil {
+		return 0, logger.Errorf("Failed to marshal SSH key request: %v", err)
+	}
+
+	req, err := http.NewRequest("POST", "https://api.linode.com/v4/profile/sshkeys", bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+providerKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+
+	if resp.StatusCode == http.StatusOK {
+		var parsed LinodeSSHKeyResponse
+		if err := json.Unmarshal(respBody, &parsed); err != nil {
+			return 0, logger.Errorf("Failed to parse SSH key response: %v", err)
+		}
+		return parsed.ID, nil
+	}
+
+	return 0, logger.Errorf("Failed to upload SSH key: status=%d body=%s", resp.StatusCode, string(respBody))
+}
+
+// DeleteLinodeSSHKey deletes an SSH key from Linode
+func DeleteLinodeSSHKey(providerKey string, keyID int) error {
+	if providerKey == "" {
+		return logger.Errorf("Provider key is empty")
+	}
+
+	req, err := http.NewRequest("DELETE", fmt.Sprintf("https://api.linode.com/v4/profile/sshkeys/%d", keyID), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+providerKey)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return logger.Errorf("SSH key deletion failed: %d %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
+func CreateLinode(providerKey string, sshKeyID int, privKeyPath, image, region, resource, rootPass, instanceFile string) (string, error) {
+	if providerKey == "" {
+		return "", logger.Errorf("Provider key is empty")
+	}
+
+	// Read the public key content from the private key path
+	pubKeyPath := privKeyPath + ".pub"
+	data, err := os.ReadFile(pubKeyPath)
+	if err != nil {
+		return "", logger.Errorf("Failed to read public key file: %v", err)
+	}
+	pubKeyContent := strings.TrimSpace(string(data))
 
 	payload := LinodeCreateRequest{
 		Booted:         true,
 		SwapSize:       512,
-		AuthorizedKeys: []string{dataStringStripped},
+		AuthorizedKeys: []string{pubKeyContent},
 		Image:          image,
 		Region:         region,
 		Type:           resource,
@@ -401,6 +499,9 @@ func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, in
 		}
 	}
 
+	// Add small delay to ensure spinner is fully cleared
+	time.Sleep(100 * time.Millisecond)
+
 	// Output the IP using logger
 	logger.Info("Instance IP: " + logger.Highlight(finalIP))
 
@@ -414,6 +515,8 @@ func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, in
 		Label:         parsedResponseBytes.Label,
 		Region:        parsedResponseBytes.Region,
 		Type:          parsedResponseBytes.Type,
+		SSHKeyID:      strconv.Itoa(sshKeyID),
+		PrivKeyPath:   privKeyPath,
 		Provider:      "Linode",
 	}
 
@@ -442,7 +545,6 @@ func CreateLinode(providerKey, pubKeyPath, image, region, resource, rootPass, in
 	}
 
 	logger.Info("Updated VPS instance file with IP: " + logger.Highlight(instanceFile))
-
 	return "", nil
 }
 
@@ -576,7 +678,7 @@ func ListLinodeInstancesTable(providerKey string, instanceFile string) (string, 
 				_ = os.Remove(tmp)
 				logger.Warn("Failed to update instances file: " + err.Error())
 			} else {
-				logger.Success("Synced IP addresses to instances file")
+				logger.Info("Synced IP addresses to instances file")
 			}
 		}
 	}
@@ -679,9 +781,25 @@ func DeleteByTableName(instanceFile string, instanceID ...string) error {
 	return os.Rename(tmp, instanceFile)
 }
 
-func DestroyLinode(providerKey, instanceID string) (string, error) {
+func DestroyLinode(providerKey, instanceID, instanceFile string) (string, error) {
 	if providerKey == "" {
 		return "", logger.Errorf("Provider key is empty")
+	}
+
+	// First, load the instance data before deleting
+	var instances LinodeInstancesToml
+	if _, err := os.Stat(instanceFile); err == nil {
+		if _, err := toml.DecodeFile(instanceFile, &instances); err != nil {
+			return "", logger.Errorf("Failed to load instances file: %v", err)
+		}
+	} else {
+		return "", logger.Errorf("Instance file not found: %s", instanceFile)
+	}
+
+	// Check if instance exists in local file
+	instance, exists := instances[instanceID]
+	if !exists {
+		return "", logger.Errorf("Instance %s not found in instances file", instanceID)
 	}
 
 	req, err := http.NewRequest("DELETE", "https://api.linode.com/v4/linode/instances/"+instanceID, nil)
@@ -698,7 +816,67 @@ func DestroyLinode(providerKey, instanceID string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	logger.Success("Deleted Linode instance: " + logger.Highlight(instanceID))
+	logger.Info("Deleted Linode instance: " + logger.Highlight(instanceID))
+
+	// Delete the SSH key from Linode
+	if instance.SSHKeyID != "" && instance.SSHKeyID != "0" {
+		keyID, err := strconv.Atoi(instance.SSHKeyID)
+		if err != nil {
+			logger.Warn("Invalid SSH key ID format: " + instance.SSHKeyID)
+		} else {
+			err = DeleteLinodeSSHKey(providerKey, keyID)
+			if err != nil {
+				logger.Warn("Failed to delete SSH key from Linode: " + err.Error())
+				// Don't return error here as instance is already deleted
+			} else {
+				logger.Info("Deleted SSH key: " + logger.Highlight(instance.SSHKeyID))
+			}
+		}
+	}
+
+	// Delete the private key file if it exists
+	if instance.PrivKeyPath != "" {
+		if err := os.Remove(instance.PrivKeyPath); err != nil {
+			logger.Warn("Failed to delete private key file: " + err.Error())
+		} else {
+			logger.Info("Deleted private key file: " + logger.Highlight(instance.PrivKeyPath))
+		}
+
+		// Also try to delete the passphrase file
+		passPhraseFile := strings.Replace(instance.PrivKeyPath, "/.ssh/", "/.secrets/", 1)
+		passPhraseFile = strings.TrimSuffix(passPhraseFile, filepath.Ext(passPhraseFile)) + ".pass"
+		if err := os.Remove(passPhraseFile); err != nil {
+			// Don't warn about this as it might not exist
+		} else {
+			logger.Info("Deleted passphrase file: " + logger.Highlight(passPhraseFile))
+		}
+	}
+
+	// Remove the instance from the TOML file
+	delete(instances, instanceID)
+
+	// Write the updated instances file atomically
+	tmp := instanceFile + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return "", logger.Errorf("Failed creating tmp instance file: %v", err)
+	}
+
+	if err := toml.NewEncoder(f).Encode(instances); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return "", logger.Errorf("Failed updating instance file: %v", err)
+	}
+
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return "", logger.Errorf("Failed to close tmp instance file: %v", err)
+	}
+
+	if err := os.Rename(tmp, instanceFile); err != nil {
+		_ = os.Remove(tmp)
+		return "", logger.Errorf("Failed to rename tmp instance file: %v", err)
+	}
 
 	return "", nil
 
