@@ -521,6 +521,18 @@ func CreateDroplet(providerKey string, sshKeyID int, privKeyPath, image, region,
 		return "", err
 	}
 	logger.Info("Updated VPS instance file with IP: " + logger.Highlight(instanceFile))
+
+	// Run Go post-provisioning setup
+	if vps.Ipv4 != "" && vps.Ipv4 != "pending" {
+		logger.Info("Starting post-provisioning setup...")
+		if err := utils.SetupPostProvisioningGo(vps.Ipv4, privKeyPath, vps.Label); err != nil {
+			logger.Warn("Post-provisioning setup failed: " + err.Error())
+			logger.Info("You can run the setup manually later by running the create command again")
+		} else {
+			logger.Info("Post-provisioning setup completed successfully!")
+		}
+	}
+
 	return vps.Id, nil
 }
 

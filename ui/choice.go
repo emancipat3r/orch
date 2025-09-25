@@ -26,3 +26,28 @@ func ChoiceProvider() string {
 
 	return provider
 }
+
+func ChoiceGeneric(title string, options []string) string {
+	var selected string
+
+	// Convert string options to huh options
+	huhOptions := make([]huh.Option[string], len(options))
+	for i, option := range options {
+		huhOptions[i] = huh.NewOption(option, option)
+	}
+
+	err := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title(title).
+				Options(huhOptions...).
+				Value(&selected),
+		),
+	).Run()
+
+	if err != nil {
+		return ""
+	}
+
+	return selected
+}

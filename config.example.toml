@@ -1,0 +1,32 @@
+[Linode]
+api_key = "your_linode_api_key_here"
+
+[DigitalOcean]
+api_key = "your_digitalocean_api_key_here"
+
+[Vultr]
+api_key = "your_vultr_api_key_here"
+
+# Configuration for vps3
+# Copy this file to ~/.config/vps3/config.toml and add your API keys
+
+# Linode API Key:
+# 1. Log into Linode Cloud Manager
+# 2. Go to Profile > API Tokens
+# 3. Create a Personal Access Token with full access
+# 4. Replace "your_linode_api_key_here" with your token
+
+# DigitalOcean API Key:
+# 1. Log into DigitalOcean Control Panel
+# 2. Go to API > Tokens/Keys
+# 3. Generate New Token with read/write access
+# 4. Replace "your_digitalocean_api_key_here" with your token
+
+# Vultr API Key:
+# 1. Log into Vultr Customer Portal
+# 2. Go to Account > API
+# 3. Enable API and note your API Key
+# 4. Replace "your_vultr_api_key_here" with your key
+
+# Note: Keep this file secure and never commit it to version control
+# The actual config file should be located at: ~/.config/vps3/config.toml
