@@ -507,10 +507,10 @@ func CreateVultrInstance(providerKey string, sshKeyID string, privKeyPath string
 	}
 	logger.Info("Updated VPS instance file with IP: " + logger.Highlight(instanceFile))
 
-	// Run Go post-provisioning setup
+	// Run Ansible post-provisioning setup
 	if finalIP != "" && finalIP != "pending" {
-		logger.Info("Starting post-provisioning setup...")
-		if err := utils.SetupPostProvisioningGo(finalIP, privKeyPath, vps.Label); err != nil {
+		logger.Info("Starting post-provisioning setup with Ansible...")
+		if err := utils.SetupPostProvisioningAnsible(finalIP, privKeyPath, vps.Label); err != nil {
 			logger.Warn("Post-provisioning setup failed: " + err.Error())
 			logger.Info("You can run the setup manually later by running the create command again")
 		} else {
@@ -655,6 +655,11 @@ func DestroyVultr(providerKey string, instanceID string, instanceFile string) er
 
 	// Delete the private key file if it exists
 	if privKeyPath != "" {
+		// Remove key from ssh-agent first
+		if err := utils.RemoveKeyFromSSHAgent(privKeyPath); err != nil {
+			logger.Debug("Could not remove key from ssh-agent: " + err.Error())
+		}
+
 		if err := os.Remove(privKeyPath); err != nil {
 			logger.Warn("Failed to delete private key file: " + err.Error())
 		} else {

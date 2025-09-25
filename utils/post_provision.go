@@ -84,10 +84,11 @@ func waitForSSHConnectionWithRetry(client *SSHClient, maxWaitTime time.Duration)
 	ctx, cancel := context.WithTimeout(context.Background(), maxWaitTime)
 	defer cancel()
 
-	spinnerProg, doneChan := ui.IPWaitSpinner(ctx, "Waiting for SSH to become available...")
+	spinnerProg, doneChan := ui.IPWaitSpinner(ctx, "Waiting for SSH port to become available...")
 
 	connected := false
 	checkInterval := 10 * time.Second
+	sshPortOpen := false
 
 	go func() {
 		defer close(doneChan)
@@ -95,23 +96,48 @@ func waitForSSHConnectionWithRetry(client *SSHClient, maxWaitTime time.Duration)
 		ticker := time.NewTicker(checkInterval)
 		defer ticker.Stop()
 
+		// Check immediately, then continue with ticker
 		for {
-			select {
-			case <-ctx.Done():
-				ui.FinishSpinner(spinnerProg, false, fmt.Sprintf("Timeout waiting for SSH after %v", maxWaitTime))
-				return
-			case <-ticker.C:
+			// First check if port 22 is reachable (like netcat)
+			logger.Debug(fmt.Sprintf("Checking if port 22 is reachable at %s:%s", client.Host, client.Port))
+			if !IsPortReachable(client.Host, client.Port, 2*time.Second) {
+				logger.Debug(fmt.Sprintf("Port 22 not reachable yet at %s:%s", client.Host, client.Port))
+				ui.UpdateSpinnerMessage(spinnerProg, fmt.Sprintf("Waiting for port 22 to open at %s...", client.Host))
+			} else {
+				logger.Debug(fmt.Sprintf("Port 22 is now reachable at %s:%s", client.Host, client.Port))
+
+				// Port is open, now try actual SSH connection
+				if !sshPortOpen {
+					logger.Info(fmt.Sprintf("Port 22 is open at %s, now testing SSH connection...", client.Host))
+					ui.UpdateSpinnerMessage(spinnerProg, "Port 22 is open, testing SSH connection...")
+					sshPortOpen = true
+				}
+
 				// Try to establish SSH connection
 				if err := client.Connect(); err == nil {
 					// Test with a simple command to ensure it's really working
 					if _, err := client.ExecuteCommand("echo 'test'"); err == nil {
 						connected = true
+						logger.Info("SSH connection test successful")
 						ui.FinishSpinner(spinnerProg, true, "")
 						return
+					} else {
+						logger.Debug(fmt.Sprintf("SSH command test failed: %v", err))
 					}
 					client.Close() // Close the connection to retry
+				} else {
+					logger.Debug(fmt.Sprintf("SSH connection failed: %v", err))
 				}
-				ui.UpdateSpinnerMessage(spinnerProg, "Still waiting for SSH to become available...")
+				ui.UpdateSpinnerMessage(spinnerProg, "SSH port open but not ready yet...")
+			}
+
+			// Wait for next check interval or context done
+			select {
+			case <-ctx.Done():
+				ui.FinishSpinner(spinnerProg, false, fmt.Sprintf("Timeout waiting for SSH after %v", maxWaitTime))
+				return
+			case <-ticker.C:
+				// Continue to next iteration
 			}
 		}
 	}()

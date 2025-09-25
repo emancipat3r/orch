@@ -73,6 +73,14 @@ func (c *SSHClient) Connect() error {
 	return nil
 }
 
+// Close closes the SSH connection safely
+func (c *SSHClient) Close() error {
+	if c.Client != nil {
+		return c.Client.Close()
+	}
+	return nil
+}
+
 // ExecuteCommand runs a command on the remote server
 func (c *SSHClient) ExecuteCommand(command string) (string, error) {
 	if c.Client == nil {
@@ -241,6 +249,16 @@ func CreateRemoteDirectory(client *SSHClient, remotePath, permissions string) er
 	}
 
 	return nil
+}
+
+// IsPortReachable checks if a TCP port is reachable (like netcat)
+func IsPortReachable(host string, port string, timeout time.Duration) bool {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), timeout)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
 
 // CheckPortOpen checks if a specific port is open and listening

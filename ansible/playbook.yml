@@ -31,16 +31,42 @@
         update_cache: yes
         cache_valid_time: 3600
 
-    - name: Wait for apt locks to be released
+    - name: Stop and disable unattended-upgrades
+      systemd:
+        name: unattended-upgrades
+        state: stopped
+        enabled: no
+      ignore_errors: yes
+
+    - name: Kill any running apt/dpkg processes
       shell: |
-        while fuser /var/lib/dpkg/lock >/dev/null 2>&1 || \
-            fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || \
-            fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do
-          echo "Waiting for other apt operations to complete..."
-          sleep 5
+        pkill -9 apt-get || true
+        pkill -9 dpkg || true
+        pkill -9 unattended-upgrade || true
+        sleep 2
+      ignore_errors: yes
+
+    - name: Wait for apt locks to be released
+      become: yes
+      shell: |
+        counter=0
+        while [ $counter -lt 60 ]; do
+          if ! fuser /var/lib/dpkg/lock >/dev/null 2>&1 && \
+             ! fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 && \
+             ! fuser /var/lib/apt/lists/lock >/dev/null 2>&1 && \
+             ! fuser /var/cache/apt/archives/lock >/dev/null 2>&1; then
+            echo "All locks released"
+            exit 0
+          fi
+          echo "Waiting for apt locks to be released... (attempt $counter/60)"
+          sleep 2
+          counter=$((counter + 1))
         done
+        echo "Timeout waiting for locks"
+        exit 1
       args:
         executable: /bin/bash
+      register: lock_wait
       changed_when: false
 
     - name: Install essential packages
@@ -56,6 +82,10 @@
           - net-tools
           - iptables-persistent
         state: present
+      retries: 3
+      delay: 10
+      register: result
+      until: result is not failed
 
     - name: Install WireGuard
       apt:
@@ -182,6 +212,12 @@
     - name: Display client configuration location
       debug:
         msg: "Client configuration saved to /root/wireguard-client/client.conf"
+
+    - name: Create Ansible facts directory
+      file:
+        path: /etc/ansible/facts.d
+        state: directory
+        mode: "0755"
 
     - name: Save WireGuard keys to local facts
       copy:
