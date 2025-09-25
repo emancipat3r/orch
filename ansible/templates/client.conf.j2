@@ -1,0 +1,10 @@
+[Interface]
+PrivateKey = {{ wg_client_private_key.stdout }}
+Address = 10.0.0.2/32
+DNS = 1.1.1.1, 8.8.8.8
+
+[Peer]
+PublicKey = {{ wg_server_public_key.stdout }}
+Endpoint = {{ ansible_default_ipv4.address }}:{{ wireguard_port }}
+AllowedIPs = 0.0.0.0/0, ::/0
+PersistentKeepalive = 25
