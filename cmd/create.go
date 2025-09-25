@@ -160,6 +160,11 @@ var createCmd = &cobra.Command{
 				return
 			}
 
+			// Add key to ssh-agent if available
+			if err := utils.AddKeyToSSHAgent(perPriv); err != nil {
+				logger.Debug("Could not add key to ssh-agent: " + err.Error())
+			}
+
 			// Upload pubkey to Linode → get unique key ID
 			keyID, err := providers.UploadLinodeSSHKey(providerKey, perPub)
 			if err != nil {
@@ -291,7 +296,12 @@ var createCmd = &cobra.Command{
 				return
 			}
 
-			// Upload pubkey to DO → get unique key ID
+			// Add key to ssh-agent if available
+			if err := utils.AddKeyToSSHAgent(perPriv); err != nil {
+				logger.Debug("Could not add key to ssh-agent: " + err.Error())
+			}
+
+			// Upload pubkey to DigitalOcean → get unique key ID
 			keyID, err := providers.UploadDOSSHKey(providerKey, perPub)
 			if err != nil {
 				logger.Error("Failed to upload SSH key to DigitalOcean: " + err.Error())
@@ -419,6 +429,11 @@ var createCmd = &cobra.Command{
 			if _, err := keygen.New(perPriv, keygen.WithKeyType(keygen.Ed25519), keygen.WithPassphrase(pass), keygen.WithWrite()); err != nil {
 				logger.Error("Failed to create per-instance keypair: " + err.Error())
 				return
+			}
+
+			// Add key to ssh-agent if available
+			if err := utils.AddKeyToSSHAgent(perPriv); err != nil {
+				logger.Debug("Could not add key to ssh-agent: " + err.Error())
 			}
 
 			// Upload pubkey to Vultr → get unique key ID

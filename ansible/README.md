@@ -206,7 +206,23 @@ sudo ip netns exec vps bash
 You can customize the playbook by modifying variables in `playbook.yml`:
 
 - `wireguard_port`: WireGuard listen port (default: 51820)
-- `wireguard_interface`: Interface name (default: wg0)
+- `wireguard_interface`: WireGuard interface name (default: wg0)
+
+### Verbose Mode
+
+To see detailed Ansible output during execution, you can enable verbose mode using environment variables:
+
+```bash
+# Enable verbose Ansible output
+export ANSIBLE_VERBOSE=1
+vps3 create
+
+# Or use VPS3_DEBUG for general debugging
+export VPS3_DEBUG=1
+vps3 create
+```
+
+This will show detailed Ansible task execution, which is helpful for debugging issues.
 
 ## Troubleshooting
 

@@ -129,8 +129,8 @@ This is useful if the initial setup failed or if you want to reconfigure an inst
 		}
 
 		// Run post-provisioning setup
-		logger.Info("Starting post-provisioning setup...")
-		if err := utils.SetupPostProvisioningGo(ip, privKeyPath, label); err != nil {
+		logger.Info("Starting post-provisioning setup with Ansible...")
+		if err := utils.SetupPostProvisioningAnsible(ip, privKeyPath, label); err != nil {
 			logger.Error("Post-provisioning setup failed: " + err.Error())
 			logger.Info("Please check the error message above and try again.")
 			logger.Info("Common issues:")

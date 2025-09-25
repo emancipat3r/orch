@@ -522,10 +522,10 @@ func CreateDroplet(providerKey string, sshKeyID int, privKeyPath, image, region,
 	}
 	logger.Info("Updated VPS instance file with IP: " + logger.Highlight(instanceFile))
 
-	// Run Go post-provisioning setup
+	// Run Ansible post-provisioning setup
 	if vps.Ipv4 != "" && vps.Ipv4 != "pending" {
-		logger.Info("Starting post-provisioning setup...")
-		if err := utils.SetupPostProvisioningGo(vps.Ipv4, privKeyPath, vps.Label); err != nil {
+		logger.Info("Starting post-provisioning setup with Ansible...")
+		if err := utils.SetupPostProvisioningAnsible(vps.Ipv4, privKeyPath, vps.Label); err != nil {
 			logger.Warn("Post-provisioning setup failed: " + err.Error())
 			logger.Info("You can run the setup manually later by running the create command again")
 		} else {
@@ -671,6 +671,11 @@ func DestroyDroplet(providerKey, instanceID, instanceFile string) (string, error
 
 	// Delete the private key file if it exists
 	if instance.PrivKeyPath != "" {
+		// Remove key from ssh-agent first
+		if err := utils.RemoveKeyFromSSHAgent(instance.PrivKeyPath); err != nil {
+			logger.Debug("Could not remove key from ssh-agent: " + err.Error())
+		}
+
 		if err := os.Remove(instance.PrivKeyPath); err != nil {
 			logger.Warn("Failed to delete private key file: " + err.Error())
 		} else {
