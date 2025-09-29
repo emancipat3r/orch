@@ -630,11 +630,7 @@ func DestroyDroplet(providerKey, instanceID, instanceFile string) (string, error
 		return "", logger.Errorf("Instance file not found: %s", instanceFile)
 	}
 
-	// Get the instance data to retrieve KeyID
 	instance, exists := instances[instanceID]
-	if !exists {
-		return "", logger.Errorf("Instance %s not found in instances file", instanceID)
-	}
 
 	// Delete the droplet first
 	req, err := http.NewRequest("DELETE", "https://api.digitalocean.com/v2/droplets/"+instanceID, nil)
@@ -693,34 +689,42 @@ func DestroyDroplet(providerKey, instanceID, instanceFile string) (string, error
 	}
 
 	// Remove the instance from the TOML file
-	delete(instances, instanceID)
+	// _, exists := instances[instanceID]
+	if exists {
+		delete(instances, instanceID)
 
-	// Write the updated instances file atomically
-	tmp := instanceFile + ".tmp"
-	f, err := os.Create(tmp)
-	if err != nil {
-		return "", logger.Errorf("Failed creating tmp instance file: %v", err)
+		// Write the updated instances file atomically
+		tmp := instanceFile + ".tmp"
+		f, err := os.Create(tmp)
+		if err != nil {
+			return "", logger.Errorf("Failed creating tmp instance file: %v", err)
+		}
+
+		if err := toml.NewEncoder(f).Encode(instances); err != nil {
+			_ = f.Close()
+			_ = os.Remove(tmp)
+			return "", logger.Errorf("Failed updating instance file: %v", err)
+		}
+
+		if err := f.Close(); err != nil {
+			_ = os.Remove(tmp)
+			return "", logger.Errorf("Failed to close tmp instance file: %v", err)
+		}
+
+		if err := os.Rename(tmp, instanceFile); err != nil {
+			_ = os.Remove(tmp)
+			return "", logger.Errorf("Failed to rename tmp instance file: %v", err)
+		}
+
+		logger.Info("Updated instance file: " + logger.Highlight(instanceFile))
+
+		return "", nil
+	} else {
+		logger.Warn("Instance not found in Instances file. Proceeding with destruction anyways...")
 	}
-
-	if err := toml.NewEncoder(f).Encode(instances); err != nil {
-		_ = f.Close()
-		_ = os.Remove(tmp)
-		return "", logger.Errorf("Failed updating instance file: %v", err)
-	}
-
-	if err := f.Close(); err != nil {
-		_ = os.Remove(tmp)
-		return "", logger.Errorf("Failed to close tmp instance file: %v", err)
-	}
-
-	if err := os.Rename(tmp, instanceFile); err != nil {
-		_ = os.Remove(tmp)
-		return "", logger.Errorf("Failed to rename tmp instance file: %v", err)
-	}
-
-	logger.Info("Updated instance file: " + logger.Highlight(instanceFile))
 
 	return "", nil
+
 }
 
 func ListDOInstancesTable(providerKey string) (string, error) {
