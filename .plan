@@ -1,0 +1,8 @@
+[To Do]
+ - Test ansible playbook running in more than one environment
+ - Fix WG template for proper connection instantiation
+ - Fix ansible inventory to write inventory files to .config dir instead of vps dir. Check for ansible dir inside of .config too.
+ - Troubleshoot logic for creating network namespace. May just need to run as root for netns creation.
+
+[20250928]
+ - Fixed condition where if instance didn't exist in instances file, destruction would fail
