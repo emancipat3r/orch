@@ -43,7 +43,6 @@ func CheckKeyInSSHAgent(privKeyPath string) bool {
 	if len(fingerprintParts) >= 2 {
 		fingerprint := fingerprintParts[1]
 		if strings.Contains(string(agentOutput), fingerprint) {
-			logger.Debug("Key is already loaded in ssh-agent")
 			return true
 		}
 	}
@@ -160,9 +159,7 @@ func WaitForSSH(ip, privKeyPath string, maxWaitTime time.Duration) error {
 		// Check immediately, then continue with ticker
 		for {
 			// First check if port 22 is reachable (like netcat)
-			logger.Debug(fmt.Sprintf("Checking if port 22 is reachable at %s", ip))
 			if !IsPortReachable(ip, "22", 2*time.Second) {
-				logger.Debug(fmt.Sprintf("Port 22 not reachable yet at %s", ip))
 				ui.UpdateSpinnerMessage(spinnerProg, fmt.Sprintf("Waiting for port 22 to open at %s...", ip))
 			} else {
 				logger.Debug(fmt.Sprintf("Port 22 is now reachable at %s", ip))
@@ -181,7 +178,6 @@ func WaitForSSH(ip, privKeyPath string, maxWaitTime time.Duration) error {
 
 				if sshAuthSock != "" && CheckKeyInSSHAgent(privKeyPath) {
 					// ssh-agent is available and key is loaded
-					logger.Debug("Using ssh-agent for authentication")
 					useSystemSSH = true
 				} else if sshAuthSock != "" {
 					// ssh-agent is running but key not loaded
@@ -201,7 +197,6 @@ func WaitForSSH(ip, privKeyPath string, maxWaitTime time.Duration) error {
 						"echo 'SSH connection test'",
 					)
 
-					logger.Debug(fmt.Sprintf("Testing SSH connection with system ssh: ssh -i %s root@%s", privKeyPath, ip))
 					if err := cmd.Run(); err == nil {
 						logger.Info("SSH connection test successful")
 						ui.FinishSpinner(spinnerProg, true, "")
