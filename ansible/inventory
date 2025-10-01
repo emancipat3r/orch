@@ -1,5 +1,0 @@
-[vps]
-142.93.51.138 ansible_host=142.93.51.138 ansible_user=root ansible_ssh_private_key_file=/home/user/.config/vps/.ssh/do-96299814 ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
-
-[vps:vars]
-ansible_python_interpreter=/usr/bin/python3

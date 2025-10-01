@@ -17,6 +17,7 @@ var (
 	pathInstances string
 	instanceFile  string
 	configFile    string
+	pathAnsible   string
 )
 
 // rootCmd is the base command for the CLI
@@ -42,11 +43,12 @@ var rootCmd = &cobra.Command{
 		pathSSH = user.HomeDir + "/.config/vps/.ssh/"
 		pathSecrets = user.HomeDir + "/.config/vps/secrets/"
 		pathInstances = user.HomeDir + "/.config/vps/instances/"
+		pathAnsible = user.HomeDir + "/.config/vps/ansible/"
 		instanceFile = pathInstances + "instances.toml"
 		configFile = pathConfig + "configuration.toml"
 
 		// Ensure all required directories exist
-		for _, dir := range []string{pathConfig, pathSSH, pathSecrets, pathInstances} {
+		for _, dir := range []string{pathConfig, pathSSH, pathSecrets, pathInstances, pathAnsible} {
 			if !utils.DirExists(dir) {
 				logger.Warn(fmt.Sprintf("Directory doesn't exist. Creating: %s", logger.Highlight(dir)))
 				if err := utils.MakeDirectory(dir); err != nil {
