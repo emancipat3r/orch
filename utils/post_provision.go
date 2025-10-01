@@ -99,16 +99,13 @@ func waitForSSHConnectionWithRetry(client *SSHClient, maxWaitTime time.Duration)
 		// Check immediately, then continue with ticker
 		for {
 			// First check if port 22 is reachable (like netcat)
-			logger.Debug(fmt.Sprintf("Checking if port 22 is reachable at %s:%s", client.Host, client.Port))
 			if !IsPortReachable(client.Host, client.Port, 2*time.Second) {
-				logger.Debug(fmt.Sprintf("Port 22 not reachable yet at %s:%s", client.Host, client.Port))
 				ui.UpdateSpinnerMessage(spinnerProg, fmt.Sprintf("Waiting for port 22 to open at %s...", client.Host))
 			} else {
 				logger.Debug(fmt.Sprintf("Port 22 is now reachable at %s:%s", client.Host, client.Port))
 
 				// Port is open, now try actual SSH connection
 				if !sshPortOpen {
-					logger.Info(fmt.Sprintf("Port 22 is open at %s, now testing SSH connection...", client.Host))
 					ui.UpdateSpinnerMessage(spinnerProg, "Port 22 is open, testing SSH connection...")
 					sshPortOpen = true
 				}
