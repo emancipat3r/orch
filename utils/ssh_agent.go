@@ -131,7 +131,7 @@ func RemoveKeyFromSSHAgent(privKeyPath string) error {
 		return nil // Not critical
 	}
 
-	logger.Info("Removed SSH key from ssh-agent: " + privKeyPath)
+	logger.Info("Removed SSH key from ssh-agent: " + logger.Highlight(privKeyPath))
 	return nil
 }
 

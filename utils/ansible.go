@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -112,18 +113,18 @@ func CheckAnsibleInstalled() error {
 }
 
 // GenerateInventory creates an Ansible inventory file for the VPS
-func GenerateInventory(config AnsibleConfig, inventoryPath string) error {
+func GenerateInventory(config AnsibleConfig, pathAnsibleInventory string) error {
 	// Read the inventory template
 	templatePath := filepath.Join("ansible", "inventory.j2")
 	templateContent, err := os.ReadFile(templatePath)
 	if err != nil {
-		return fmt.Errorf("failed to read inventory template: %w", err)
+		return logger.Errorf("failed to read inventory template: %w", err)
 	}
 
 	// Parse and execute template
 	tmpl, err := template.New("inventory").Parse(string(templateContent))
 	if err != nil {
-		return fmt.Errorf("failed to parse inventory template: %w", err)
+		return logger.Errorf("failed to parse inventory template: %w", err)
 	}
 
 	var buf bytes.Buffer
@@ -132,7 +133,7 @@ func GenerateInventory(config AnsibleConfig, inventoryPath string) error {
 	}
 
 	// Write inventory file
-	if err := os.WriteFile(inventoryPath, buf.Bytes(), 0644); err != nil {
+	if err := os.WriteFile(pathAnsibleInventory, buf.Bytes(), 0644); err != nil {
 		return fmt.Errorf("failed to write inventory file: %w", err)
 	}
 
@@ -160,13 +161,10 @@ func WaitForSSH(ip, privKeyPath string, maxWaitTime time.Duration) error {
 		for {
 			// First check if port 22 is reachable (like netcat)
 			if !IsPortReachable(ip, "22", 2*time.Second) {
-				ui.UpdateSpinnerMessage(spinnerProg, fmt.Sprintf("Waiting for port 22 to open at %s...", ip))
+				ui.UpdateSpinnerMessage(spinnerProg, fmt.Sprintf("Waiting for SSH port to become available..."))
 			} else {
-				logger.Debug(fmt.Sprintf("Port 22 is now reachable at %s", ip))
-
 				// Port is open, now try actual SSH connection
 				if !sshReady {
-					logger.Info(fmt.Sprintf("Port 22 is open at %s, now testing SSH connection...", ip))
 					ui.UpdateSpinnerMessage(spinnerProg, "Port 22 is open, testing SSH connection...")
 					sshReady = true
 				}
@@ -288,7 +286,7 @@ func CheckOSCompatibility(ip, privKeyPath string) (bool, string, error) {
 }
 
 // RunAnsiblePlaybook executes the Ansible playbook
-func RunAnsiblePlaybook(inventoryPath, playbookPath, privKeyPath string, verbose bool) error {
+func RunAnsiblePlaybook(pathAnsibleInventory, playbookPath, privKeyPath string, verbose bool) error {
 	logger.Info("Running Ansible playbook (output will stream below)...")
 	logger.Info(strings.Repeat("=", 70))
 
@@ -303,7 +301,7 @@ func RunAnsiblePlaybook(inventoryPath, playbookPath, privKeyPath string, verbose
 
 	// Build ansible-playbook command arguments
 	args := []string{
-		"-i", inventoryPath,
+		"-i", pathAnsibleInventory,
 		playbookPath,
 		"--ssh-common-args=-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
 	}
@@ -371,8 +369,14 @@ func SetupPostProvisioningAnsible(ip, privKeyPath, vpsName string) error {
 		VPSName:     vpsName,
 	}
 
-	inventoryPath := filepath.Join("ansible", "inventory")
-	if err := GenerateInventory(config, inventoryPath); err != nil {
+	user, err := user.Current()
+	if err != nil {
+		logger.Error("Failed to get current user: " + err.Error())
+		return err
+	}
+	pathConfig := user.HomeDir + "/.config/vps/"
+	pathAnsibleInventory := pathConfig + "ansible/inventory"
+	if err := GenerateInventory(config, pathAnsibleInventory); err != nil {
 		return fmt.Errorf("failed to generate inventory: %w", err)
 	}
 
@@ -381,7 +385,7 @@ func SetupPostProvisioningAnsible(ip, privKeyPath, vpsName string) error {
 	verbose := os.Getenv("ANSIBLE_VERBOSE") != "" || os.Getenv("VPS3_DEBUG") != ""
 
 	logger.Info("Starting Ansible playbook execution...")
-	if err := RunAnsiblePlaybook(inventoryPath, playbookPath, privKeyPath, verbose); err != nil {
+	if err := RunAnsiblePlaybook(pathAnsibleInventory, playbookPath, privKeyPath, verbose); err != nil {
 		return fmt.Errorf("failed to run playbook: %w", err)
 	}
 

@@ -103,7 +103,7 @@ var destroyCmd = &cobra.Command{
 				}
 			}
 
-			logger.Info("Completed destruction of " + strconv.Itoa(len(selectedInstances)) + " Linode instance(s)")
+			logger.Info("Completed destruction of " + logger.Highlight(strconv.Itoa(len(selectedInstances))) + " Linode instance(s)")
 
 		case "DigitalOcean":
 			providerKey := providers.GetDOAPIKey(configFile, provider)
@@ -178,7 +178,7 @@ var destroyCmd = &cobra.Command{
 				}
 			}
 
-			logger.Info("Completed destruction of " + strconv.Itoa(len(selectedInstances)) + " DigitalOcean instance(s)")
+			logger.Info("Completed destruction of " + logger.Highlight(strconv.Itoa(len(selectedInstances))) + " DigitalOcean instance(s)")
 
 		case "Vultr":
 			providerKey := providers.GetVultrAPIKey(configFile, provider)
@@ -247,7 +247,7 @@ var destroyCmd = &cobra.Command{
 				}
 			}
 
-			logger.Info("Completed destruction of " + strconv.Itoa(len(selectedInstances)) + " Vultr instance(s)")
+			logger.Info("Completed destruction of " + logger.Highlight(strconv.Itoa(len(selectedInstances))) + " Vultr instance(s)")
 		default:
 			logger.Warn("No provider was selected. Exiting...")
 		}
