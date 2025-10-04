@@ -524,12 +524,8 @@ func CreateDroplet(providerKey string, sshKeyID int, privKeyPath, image, region,
 
 	// Run Ansible post-provisioning setup
 	if vps.Ipv4 != "" && vps.Ipv4 != "pending" {
-		logger.Info("Starting post-provisioning setup with Ansible...")
 		if err := utils.SetupPostProvisioningAnsible(vps.Ipv4, privKeyPath, vps.Label); err != nil {
 			logger.Warn("Post-provisioning setup failed: " + err.Error())
-			logger.Info("You can run the setup manually later by running the create command again")
-		} else {
-			logger.Info("Post-provisioning setup completed successfully!")
 		}
 	}
 

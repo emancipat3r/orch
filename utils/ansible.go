@@ -196,7 +196,6 @@ func WaitForSSH(ip, privKeyPath string, maxWaitTime time.Duration) error {
 					)
 
 					if err := cmd.Run(); err == nil {
-						logger.Info("SSH connection test successful")
 						ui.FinishSpinner(spinnerProg, true, "")
 						return
 					} else {
@@ -213,7 +212,6 @@ func WaitForSSH(ip, privKeyPath string, maxWaitTime time.Duration) error {
 							// Test with a simple command
 							if output, err := sshClient.ExecuteCommand("echo 'SSH connection test'"); err == nil {
 								logger.Debug(fmt.Sprintf("SSH test output: %s", strings.TrimSpace(output)))
-								logger.Info("SSH connection test successful")
 								ui.FinishSpinner(spinnerProg, true, "")
 								sshClient.Close()
 								return
@@ -253,14 +251,12 @@ func WaitForSSH(ip, privKeyPath string, maxWaitTime time.Duration) error {
 	case <-ctx.Done():
 		return fmt.Errorf("timeout waiting for SSH to become available after %v", maxWaitTime)
 	default:
-		logger.Info("SSH connection established successfully")
 		return nil
 	}
 }
 
 // CheckOSCompatibility checks if the VPS is running Ubuntu or Debian
 func CheckOSCompatibility(ip, privKeyPath string) (bool, string, error) {
-	logger.Info("Checking OS compatibility...")
 
 	// Use Go SSH client to avoid passphrase prompts
 	sshClient, err := NewSSHClient(ip, "22", "root", privKeyPath)
@@ -287,7 +283,6 @@ func CheckOSCompatibility(ip, privKeyPath string) (bool, string, error) {
 
 // RunAnsiblePlaybook executes the Ansible playbook
 func RunAnsiblePlaybook(pathAnsibleInventory, playbookPath, privKeyPath string, verbose bool) error {
-	logger.Info("Running Ansible playbook (output will stream below)...")
 	logger.Info(strings.Repeat("=", 70))
 
 	// Create SSH wrapper to handle passphrase
@@ -296,7 +291,6 @@ func RunAnsiblePlaybook(pathAnsibleInventory, playbookPath, privKeyPath string, 
 		logger.Warn(fmt.Sprintf("Could not create SSH wrapper: %v", err))
 	} else {
 		defer os.Remove(wrapperPath)
-		logger.Debug(fmt.Sprintf("Created SSH wrapper at: %s", wrapperPath))
 	}
 
 	// Build ansible-playbook command arguments
@@ -311,9 +305,6 @@ func RunAnsiblePlaybook(pathAnsibleInventory, playbookPath, privKeyPath string, 
 		args = append(args, "-v")
 		logger.Info("Running in verbose mode...")
 	}
-
-	// Display the command being run (useful for debugging)
-	logger.Debug("Executing: ansible-playbook " + strings.Join(args, " "))
 
 	cmd := exec.Command("ansible-playbook", args...)
 	cmd.Stdout = os.Stdout
@@ -331,20 +322,17 @@ func RunAnsiblePlaybook(pathAnsibleInventory, playbookPath, privKeyPath string, 
 	}
 
 	logger.Info(strings.Repeat("=", 70))
-	logger.Info("Ansible playbook completed successfully")
+	logger.Info("Ansible playbook complete")
 	return nil
 }
 
 // SetupPostProvisioningAnsible orchestrates the complete Ansible setup process
 func SetupPostProvisioningAnsible(ip, privKeyPath, vpsName string) error {
-	logger.Info("Initializing Ansible-based post-provisioning setup...")
 
 	// Check if Ansible is installed
 	if err := CheckAnsibleInstalled(); err != nil {
 		return fmt.Errorf("ansible is not installed. To install: pip install ansible or apt install ansible")
 	}
-
-	logger.Info("Ansible is installed, checking VPS connectivity...")
 
 	// Wait for SSH to become available
 	if err := WaitForSSH(ip, privKeyPath, 5*time.Minute); err != nil {
@@ -358,8 +346,6 @@ func SetupPostProvisioningAnsible(ip, privKeyPath, vpsName string) error {
 		// Continue anyway as the playbook will fail gracefully if OS is not supported
 	} else if !compatible {
 		return fmt.Errorf("OS '%s' is not supported by Ansible playbook (only Ubuntu/Debian)", osID)
-	} else {
-		logger.Info("OS is compatible (" + osID + "), proceeding with Ansible setup")
 	}
 
 	// Generate inventory file
@@ -384,28 +370,21 @@ func SetupPostProvisioningAnsible(ip, privKeyPath, vpsName string) error {
 	playbookPath := filepath.Join("ansible", "playbook.yml")
 	verbose := os.Getenv("ANSIBLE_VERBOSE") != "" || os.Getenv("VPS3_DEBUG") != ""
 
-	logger.Info("Starting Ansible playbook execution...")
 	if err := RunAnsiblePlaybook(pathAnsibleInventory, playbookPath, privKeyPath, verbose); err != nil {
 		return fmt.Errorf("failed to run playbook: %w", err)
 	}
 
 	// Download client configuration
-	logger.Info("Downloading WireGuard client configuration...")
 	if err := DownloadClientConfig(ip, privKeyPath); err != nil {
 		logger.Warn("Failed to download WireGuard client configuration: " + err.Error())
 		logger.Info("You can manually download it from: /root/wireguard-client/client.conf")
-	} else {
-		logger.Info("WireGuard client configuration downloaded successfully")
 	}
 
-	logger.Success("Ansible post-provisioning setup completed successfully!")
-	logger.Info("Your VPS is now configured with WireGuard VPN")
 	return nil
 }
 
 // DownloadClientConfig downloads the WireGuard client configuration from the VPS
 func DownloadClientConfig(ip, privKeyPath string) error {
-	logger.Info("Downloading WireGuard client configuration...")
 
 	// Create local directory for client configs
 	clientDir := "wireguard-clients"
@@ -426,7 +405,6 @@ func DownloadClientConfig(ip, privKeyPath string) error {
 		return fmt.Errorf("failed to download client config: %w", err)
 	}
 
-	logger.Info("WireGuard client configuration downloaded to: " + logger.Highlight(filepath.Join(clientDir, fmt.Sprintf("client-%s.conf", ip))))
 	return nil
 }
 

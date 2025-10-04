@@ -548,12 +548,8 @@ func CreateLinode(providerKey string, sshKeyID int, privKeyPath, image, region, 
 
 	// Run Ansible post-provisioning setup
 	if finalIP != "" && finalIP != "pending" {
-		logger.Info("Starting post-provisioning setup with Ansible...")
 		if err := utils.SetupPostProvisioningAnsible(finalIP, privKeyPath, VPS.Label); err != nil {
 			logger.Warn("Post-provisioning setup failed: " + err.Error())
-			logger.Info("You can run the setup manually later by running the create command again")
-		} else {
-			logger.Info("Post-provisioning setup completed successfully!")
 		}
 	}
 

@@ -129,7 +129,6 @@ This is useful if the initial setup failed or if you want to reconfigure an inst
 		}
 
 		// Run post-provisioning setup
-		logger.Info("Starting post-provisioning setup with Ansible...")
 		if err := utils.SetupPostProvisioningAnsible(ip, privKeyPath, label); err != nil {
 			logger.Error("Post-provisioning setup failed: " + err.Error())
 			logger.Info("Please check the error message above and try again.")
@@ -138,16 +137,10 @@ This is useful if the initial setup failed or if you want to reconfigure an inst
 			logger.Info("  - SSH key permissions might be incorrect (check key file permissions)")
 			logger.Info("  - Firewall might be blocking SSH connections")
 			return
+		} else {
+			logger.Info("Post-provisioning setup completed")
 		}
 
-		logger.Info("Post-provisioning setup completed successfully!")
-		logger.Info("Your VPS is now configured with:")
-		logger.Info("  ✓ WireGuard VPN server")
-		logger.Info("  ✓ Firewall (UFW) enabled")
-		logger.Info("  ✓ SSH hardening applied")
-		logger.Info("  ✓ Client configuration downloaded")
-
-		logger.Info("Check the 'wireguard-clients' directory for your VPN configuration files.")
 	},
 }
 
