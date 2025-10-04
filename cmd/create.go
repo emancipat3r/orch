@@ -36,6 +36,7 @@ var createCmd = &cobra.Command{
 			logger.Info("Operation cancelled by user.")
 			return
 		}
+
 		logger.Info("You selected: " + logger.Highlight(provider))
 
 		// Load data for the selected provider and create navigable wizard

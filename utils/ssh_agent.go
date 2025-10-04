@@ -80,7 +80,6 @@ func AddKeyToSSHAgent(privKeyPath string) error {
 		return fmt.Errorf("agent add: %w", err)
 	}
 
-	logger.Info("Added SSH key to ssh-agent: " + logger.Highlight(privKeyPath))
 	return nil
 }
 
