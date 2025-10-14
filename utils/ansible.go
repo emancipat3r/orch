@@ -115,7 +115,7 @@ func CheckAnsibleInstalled() error {
 // GenerateInventory creates an Ansible inventory file for the VPS
 func GenerateInventory(config AnsibleConfig, pathAnsibleInventory string) error {
 	// Read the inventory template
-	templatePath := filepath.Join("ansible", "inventory.j2")
+	templatePath := filepath.Join("templates", "inventory")
 	templateContent, err := os.ReadFile(templatePath)
 	if err != nil {
 		return logger.Errorf("failed to read inventory template: %w", err)

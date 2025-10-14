@@ -1,7 +1,6 @@
 [Interface]
 PrivateKey = {{ wg_client_private_key.stdout }}
-Address = 10.0.0.2/32
-DNS = 1.1.1.1, 8.8.8.8
+Address = 172.16.10.2/30 
 
 [Peer]
 PublicKey = {{ wg_server_public_key.stdout }}
