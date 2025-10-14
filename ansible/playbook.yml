@@ -26,11 +26,6 @@
         msg: "Running on {{ ansible_distribution }} {{ ansible_distribution_version }}"
 
   tasks:
-    - name: Update apt cache
-      apt:
-        update_cache: yes
-        cache_valid_time: 3600
-
     - name: Stop and disable unattended-upgrades
       systemd:
         name: unattended-upgrades
@@ -46,27 +41,21 @@
         sleep 2
       ignore_errors: yes
 
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
     - name: Wait for apt locks to be released
-      become: yes
       shell: |
-        counter=0
-        while [ $counter -lt 60 ]; do
-          if ! fuser /var/lib/dpkg/lock >/dev/null 2>&1 && \
-             ! fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 && \
-             ! fuser /var/lib/apt/lists/lock >/dev/null 2>&1 && \
-             ! fuser /var/cache/apt/archives/lock >/dev/null 2>&1; then
-            echo "All locks released"
-            exit 0
-          fi
-          echo "Waiting for apt locks to be released... (attempt $counter/60)"
-          sleep 2
-          counter=$((counter + 1))
+        while fuser /var/lib/dpkg/lock >/dev/null 2>&1 || \
+            fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || \
+            fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do
+          echo "Waiting for other apt operations to complete..."
+          sleep 5
         done
-        echo "Timeout waiting for locks"
-        exit 1
       args:
         executable: /bin/bash
-      register: lock_wait
       changed_when: false
 
     - name: Install essential packages
@@ -138,45 +127,43 @@
 
     - name: Create WireGuard server configuration
       template:
-        src: wg0.conf.j2
+        src: ../templates/server_wg_config 
         dest: /etc/wireguard/wg0.conf
         mode: "0600"
       notify: restart wireguard
 
-    - name: Create client configuration directory
+    - name: Create client remote configuration directory
       file:
         path: /root/wireguard-client
         state: directory
         mode: "0700"
 
-    - name: Create WireGuard client configuration
-      template:
-        src: client.conf.j2
-        dest: /root/wireguard-client/client.conf
-        mode: "0600"
+    - name: Create WireGuard client configuration locally & remotely
+      block:
+        - name: Local wg client config 
+          ansible.builtin.template:
+            src: ../templates/client_wg_config
+            dest: ~/.config/vps/wg/client.conf
+            mode: "0600"
+          delegate_to: localhost
+          become: false
 
-    - name: Generate QR code for client configuration
-      shell: qrencode -t ansiutf8 < /root/wireguard-client/client.conf > /root/wireguard-client/client-qr.txt
-      args:
-        creates: /root/wireguard-client/client-qr.txt
+        - name: Generate the file on the remote device
+          ansible.builtin.template:
+            src: ../templates/client_wg_config
+            dest: /root/wireguard-client/client.conf 
+            mode: "0600"
 
-    - name: Configure UFW to allow WireGuard
-      ufw:
-        rule: allow
-        port: "{{ wireguard_port }}"
-        proto: udp
+    - name: Refresh package facts
+      ansible.builtin.package_facts:
+        manager: auto
 
-    - name: Configure UFW to allow SSH
-      ufw:
-        rule: allow
-        port: "22"
-        proto: tcp
-
-    - name: Disable UFW
-      ufw:
+    - name: Disable UFW if installed
+      ansible.builtin.ufw:
         state: disabled
+      when: "'ufw' in ansible_facts.packages"
 
-    - name: Configure SSH security
+    - name: Configure SSHD
       lineinfile:
         path: /etc/ssh/sshd_config
         regexp: "{{ item.regexp }}"
@@ -208,10 +195,6 @@
     - name: Display server public key
       debug:
         msg: "WireGuard Server Public Key: {{ wg_server_public_key.stdout }}"
-
-    - name: Display client configuration location
-      debug:
-        msg: "Client configuration saved to /root/wireguard-client/client.conf"
 
     - name: Create Ansible facts directory
       file:

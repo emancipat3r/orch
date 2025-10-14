@@ -109,8 +109,7 @@ func ListLinodes(providerKey string) (string, error) {
 		return "", logger.Errorf("Unexpected status code: %s | %s", strconv.Itoa(response.StatusCode), string(responseBytes))
 	}
 
-	formattedResponse := utils.PrettyPrintJSON(responseBytes)
-	return formattedResponse, nil
+	return string(responseBytes), nil
 }
 
 type LinodeRegion struct {

@@ -15,6 +15,7 @@ var (
 	pathSSH       string
 	pathSecrets   string
 	pathInstances string
+	pathWg        string
 	instanceFile  string
 	configFile    string
 	pathAnsible   string
@@ -44,11 +45,12 @@ var rootCmd = &cobra.Command{
 		pathSecrets = user.HomeDir + "/.config/vps/secrets/"
 		pathInstances = user.HomeDir + "/.config/vps/instances/"
 		pathAnsible = user.HomeDir + "/.config/vps/ansible/"
+		pathWg = user.HomeDir + "/.config/vps/wg/"
 		instanceFile = pathInstances + "instances.toml"
 		configFile = pathConfig + "configuration.toml"
 
 		// Ensure all required directories exist
-		for _, dir := range []string{pathConfig, pathSSH, pathSecrets, pathInstances, pathAnsible} {
+		for _, dir := range []string{pathConfig, pathSSH, pathSecrets, pathInstances, pathAnsible, pathWg} {
 			if !utils.DirExists(dir) {
 				logger.Warn(fmt.Sprintf("Directory doesn't exist. Creating: %s", logger.Highlight(dir)))
 				if err := utils.MakeDirectory(dir); err != nil {
