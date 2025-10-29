@@ -174,6 +174,11 @@ var createCmd = &cobra.Command{
 			}
 			logger.Info("Per-instance SSH key ID: " + logger.Highlight(strconv.Itoa(keyID)))
 
+			// Generate default vpsName if not provided
+			if vpsName == "" {
+				vpsName = "linode-" + providers.CreateUID()
+			}
+
 			// Create the instance with this key ID and persist priv key path
 			logger.Info("Creating Linode...")
 			_, err = providers.CreateLinode(
@@ -185,6 +190,7 @@ var createCmd = &cobra.Command{
 				selectedResourceSplit[0],
 				rootPassword,
 				instanceFile,
+				vpsName,
 			)
 
 			if err != nil {
@@ -310,6 +316,11 @@ var createCmd = &cobra.Command{
 			}
 			logger.Info("Droplet SSH key ID: " + logger.Highlight(perPriv))
 
+			// Generate default vpsName if not provided
+			if vpsName == "" {
+				vpsName = "digitalocean-" + providers.CreateUID()
+			}
+
 			// Create the droplet with this key ID and persist priv key path
 			_, err = providers.CreateDroplet(
 				providerKey,
@@ -319,6 +330,7 @@ var createCmd = &cobra.Command{
 				selectedRegionSlug,
 				selectedSizeSlug,
 				instanceFile,
+				vpsName,
 			)
 
 			if err != nil {
@@ -445,7 +457,11 @@ var createCmd = &cobra.Command{
 			}
 			logger.Info("Per-instance SSH key ID: " + logger.Highlight(keyID))
 
-			// Create the instance with this key ID and persist priv key path
+			// Generate default vpsName if not provided
+			if vpsName == "" {
+				vpsName = "vultr-" + providers.CreateUID()
+			}
+
 			logger.Info("Creating Vultr instance...")
 			instanceID, err := providers.CreateVultrInstance(
 				providerKey,
@@ -455,6 +471,7 @@ var createCmd = &cobra.Command{
 				selectedRegionID,
 				selectedPlanID,
 				instanceFile,
+				vpsName,
 			)
 
 			if err != nil {
@@ -470,5 +487,7 @@ var createCmd = &cobra.Command{
 }
 
 func init() {
+	createCmd.Flags().StringVarP(&vpsName, "name", "n", "", "Custom name for the VPS instance (defaults to instance label)")
+
 	rootCmd.AddCommand(createCmd)
 }

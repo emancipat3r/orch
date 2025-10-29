@@ -19,6 +19,7 @@ var (
 	instanceFile  string
 	configFile    string
 	pathAnsible   string
+	vpsName       string
 )
 
 // rootCmd is the base command for the CLI

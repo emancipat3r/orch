@@ -109,6 +109,11 @@ This is useful if the initial setup failed or if you want to reconfigure an inst
 			label = "vps-instance"
 		}
 
+		// Use the label as default if vpsName is not provided via flag
+		if vpsName == "" {
+			vpsName = label
+		}
+
 		// Check if private key file exists
 		if _, err := os.Stat(privKeyPath); os.IsNotExist(err) {
 			logger.Error("Private key file not found: " + privKeyPath)
@@ -119,6 +124,7 @@ This is useful if the initial setup failed or if you want to reconfigure an inst
 		logger.Info("Setting up VPS instance:")
 		logger.Info("  IP Address: " + logger.Highlight(ip))
 		logger.Info("  Label: " + logger.Highlight(label))
+		logger.Info("  VPS Name: " + logger.Highlight(vpsName))
 		logger.Info("  Private Key: " + logger.Highlight(privKeyPath))
 
 		// Confirm with user
@@ -129,13 +135,8 @@ This is useful if the initial setup failed or if you want to reconfigure an inst
 		}
 
 		// Run post-provisioning setup
-		if err := utils.SetupPostProvisioningAnsible(ip, privKeyPath, label); err != nil {
+		if err := utils.SetupPostProvisioningAnsible(ip, privKeyPath, vpsName); err != nil {
 			logger.Error("Post-provisioning setup failed: " + err.Error())
-			logger.Info("Please check the error message above and try again.")
-			logger.Info("Common issues:")
-			logger.Info("  - Instance might not be fully booted yet (wait a few minutes)")
-			logger.Info("  - SSH key permissions might be incorrect (check key file permissions)")
-			logger.Info("  - Firewall might be blocking SSH connections")
 			return
 		} else {
 			logger.Info("Post-provisioning setup completed")
@@ -145,5 +146,7 @@ This is useful if the initial setup failed or if you want to reconfigure an inst
 }
 
 func init() {
+	setupCmd.Flags().StringVarP(&vpsName, "name", "n", "", "Custom name for the VPS instance (defaults to instance label)")
+
 	rootCmd.AddCommand(setupCmd)
 }

@@ -30,7 +30,7 @@ func AddKeyToSSHAgent(privKeyPath string) error {
 		return logger.Errorf("read private key: %w", err)
 	}
 
-	// 3) Derive passphrase path and read passphrase if present
+	// 3) Get pass for privkey
 	passphrase, err := readPassphraseForKey(privKeyPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		// Only treat non-ENOENT as error; if the file doesn't exist, we try no-pass.
@@ -106,6 +106,41 @@ func alreadyLoaded(ag agent.ExtendedAgent, wantBlob []byte) bool {
 			return true
 		}
 	}
+	return false
+}
+
+// CheckKeyInSSHAgent checks if a specific SSH key is loaded in ssh-agent
+func CheckKeyInSSHAgent(privKeyPath string) bool {
+	// Check if ssh-agent is running
+	if os.Getenv("SSH_AUTH_SOCK") == "" {
+		return false
+	}
+
+	// Get fingerprint of the private key
+	cmd := exec.Command("ssh-keygen", "-l", "-f", privKeyPath)
+	fingerprintOutput, err := cmd.Output()
+	if err != nil {
+		logger.Debug(fmt.Sprintf("Could not get key fingerprint: %v", err))
+		return false
+	}
+
+	// Check if this fingerprint is in ssh-agent
+	cmd = exec.Command("ssh-add", "-l")
+	agentOutput, err := cmd.Output()
+	if err != nil {
+		logger.Debug("No keys in ssh-agent")
+		return false
+	}
+
+	// Extract fingerprint from the output (format: "256 SHA256:xxx comment")
+	fingerprintParts := strings.Fields(string(fingerprintOutput))
+	if len(fingerprintParts) >= 2 {
+		fingerprint := fingerprintParts[1]
+		if strings.Contains(string(agentOutput), fingerprint) {
+			return true
+		}
+	}
+
 	return false
 }
 

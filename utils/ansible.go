@@ -16,40 +16,7 @@ import (
 	"github.com/emancipat3r/vps3/ui"
 )
 
-// CheckKeyInSSHAgent checks if the SSH key is loaded in ssh-agent
-func CheckKeyInSSHAgent(privKeyPath string) bool {
-	// Check if ssh-agent is running
-	if os.Getenv("SSH_AUTH_SOCK") == "" {
-		return false
-	}
-
-	// Get fingerprint of the private key
-	cmd := exec.Command("ssh-keygen", "-l", "-f", privKeyPath)
-	fingerprintOutput, err := cmd.Output()
-	if err != nil {
-		logger.Debug(fmt.Sprintf("Could not get key fingerprint: %v", err))
-		return false
-	}
-
-	// Check if this fingerprint is in ssh-agent
-	cmd = exec.Command("ssh-add", "-l")
-	agentOutput, err := cmd.Output()
-	if err != nil {
-		logger.Debug("No keys in ssh-agent")
-		return false
-	}
-
-	// Extract fingerprint from the output (format: "256 SHA256:xxx comment")
-	fingerprintParts := strings.Fields(string(fingerprintOutput))
-	if len(fingerprintParts) >= 2 {
-		fingerprint := fingerprintParts[1]
-		if strings.Contains(string(agentOutput), fingerprint) {
-			return true
-		}
-	}
-
-	return false
-}
+var pathWg string
 
 // CreateSSHWrapperForAnsible creates a wrapper script that Ansible can use for SSH with passphrase
 func CreateSSHWrapperForAnsible(privKeyPath string) (string, error) {
@@ -375,7 +342,7 @@ func SetupPostProvisioningAnsible(ip, privKeyPath, vpsName string) error {
 	}
 
 	// Download client configuration
-	if err := DownloadClientConfig(ip, privKeyPath); err != nil {
+	if err := DownloadClientConfig(ip, privKeyPath, vpsName); err != nil {
 		logger.Warn("Failed to download WireGuard client configuration: " + err.Error())
 		logger.Info("You can manually download it from: /root/wireguard-client/client.conf")
 	}
@@ -384,13 +351,16 @@ func SetupPostProvisioningAnsible(ip, privKeyPath, vpsName string) error {
 }
 
 // DownloadClientConfig downloads the WireGuard client configuration from the VPS
-func DownloadClientConfig(ip, privKeyPath string) error {
+func DownloadClientConfig(ip, privKeyPath, vpsName string) error {
+
+	// Get current user
+	currentUser, err := user.Current()
+	if err != nil {
+		return fmt.Errorf("failed to get current user: %w", err)
+	}
 
 	// Create local directory for client configs
-	clientDir := "wireguard-clients"
-	if err := os.MkdirAll(clientDir, 0755); err != nil {
-		return fmt.Errorf("failed to create client directory: %w", err)
-	}
+	pathWg = currentUser.HomeDir + "/.config/vps/wg/"
 
 	// Download client.conf
 	scpCmd := exec.Command("scp",
@@ -398,7 +368,7 @@ func DownloadClientConfig(ip, privKeyPath string) error {
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
 		fmt.Sprintf("root@%s:/root/wireguard-client/client.conf", ip),
-		filepath.Join(clientDir, fmt.Sprintf("client-%s.conf", ip)),
+		filepath.Join(pathWg, fmt.Sprintf("%s.conf", vpsName)),
 	)
 
 	if err := scpCmd.Run(); err != nil {
