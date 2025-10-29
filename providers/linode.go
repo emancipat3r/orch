@@ -263,6 +263,7 @@ type LinodeInstance struct {
 	SSHKeyID      string `toml:"ssh_key_id"`
 	PrivKeyPath   string `toml:"priv_key_path"`
 	Provider      string `toml:"provider"`
+	VPSName       string `toml:"vps_name"`
 }
 
 type LinodeInstancesToml = map[string]LinodeInstance
@@ -362,7 +363,7 @@ func DeleteLinodeSSHKey(providerKey string, keyID int) error {
 	return nil
 }
 
-func CreateLinode(providerKey string, sshKeyID int, privKeyPath, image, region, resource, rootPass, instanceFile string) (string, error) {
+func CreateLinode(providerKey string, sshKeyID int, privKeyPath, image, region, resource, rootPass, instanceFile, vpsName string) (string, error) {
 	if providerKey == "" {
 		return "", logger.Errorf("Provider key is empty")
 	}
@@ -517,6 +518,7 @@ func CreateLinode(providerKey string, sshKeyID int, privKeyPath, image, region, 
 		SSHKeyID:      strconv.Itoa(sshKeyID),
 		PrivKeyPath:   privKeyPath,
 		Provider:      "Linode",
+		VPSName:       vpsName,
 	}
 
 	var allinstances LinodeInstancesToml
@@ -547,7 +549,7 @@ func CreateLinode(providerKey string, sshKeyID int, privKeyPath, image, region, 
 
 	// Run Ansible post-provisioning setup
 	if finalIP != "" && finalIP != "pending" {
-		if err := utils.SetupPostProvisioningAnsible(finalIP, privKeyPath, VPS.Label); err != nil {
+		if err := utils.SetupPostProvisioningAnsible(finalIP, privKeyPath, vpsName); err != nil {
 			logger.Warn("Post-provisioning setup failed: " + err.Error())
 		}
 	}
@@ -861,6 +863,30 @@ func DestroyLinode(providerKey, instanceID, instanceFile string) (string, error)
 			// Don't warn about this as it might not exist
 		} else {
 			logger.Info("Deleted passphrase file: " + logger.Highlight(passPhraseFile))
+		}
+	}
+
+	// Delete the WireGuard client config if it exists
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		var wgConfigPath string
+		if instance.VPSName != "" {
+			// Use VPSName if available (new instances)
+			wgConfigPath = filepath.Join(homeDir, ".config", "vps", "wg", instance.VPSName+".conf")
+		} else if instance.Ipv4 != "" && instance.Ipv4 != "pending" {
+			// Fallback to IP-based name for backward compatibility
+			wgConfigPath = filepath.Join(homeDir, ".config", "vps", "wg", "client-"+instance.Ipv4+".conf")
+		}
+
+		if wgConfigPath != "" {
+			if err := os.Remove(wgConfigPath); err != nil {
+				// Check if file exists before warning
+				if !os.IsNotExist(err) {
+					logger.Warn("Failed to delete WireGuard config: " + err.Error())
+				}
+			} else {
+				logger.Info("Deleted WireGuard config: " + logger.Highlight(wgConfigPath))
+			}
 		}
 	}
 

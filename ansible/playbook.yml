@@ -127,7 +127,7 @@
 
     - name: Create WireGuard server configuration
       template:
-        src: ../templates/server_wg_config 
+        src: ../templates/server_wg_config
         dest: /etc/wireguard/wg0.conf
         mode: "0600"
       notify: restart wireguard
@@ -138,21 +138,11 @@
         state: directory
         mode: "0700"
 
-    - name: Create WireGuard client configuration locally & remotely
-      block:
-        - name: Local wg client config 
-          ansible.builtin.template:
-            src: ../templates/client_wg_config
-            dest: ~/.config/vps/wg/client.conf
-            mode: "0600"
-          delegate_to: localhost
-          become: false
-
-        - name: Generate the file on the remote device
-          ansible.builtin.template:
-            src: ../templates/client_wg_config
-            dest: /root/wireguard-client/client.conf 
-            mode: "0600"
+    - name: Create client configuration file
+      ansible.builtin.template:
+        src: ../templates/client_wg_config
+        dest: /root/wireguard-client/client.conf
+        mode: "0600"
 
     - name: Refresh package facts
       ansible.builtin.package_facts:

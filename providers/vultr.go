@@ -345,11 +345,12 @@ type VultrInstanceRecord struct {
 	PrivKeyPath     string `toml:"priv_key_path"`
 	DefaultPassword string `toml:"default_password"`
 	Provider        string `toml:"provider"`
+	VPSName         string `toml:"vps_name"`
 }
 
 type VultrInstancesToml map[string]VultrInstanceRecord
 
-func CreateVultrInstance(providerKey string, sshKeyID string, privKeyPath string, osID int, region string, plan string, instanceFile string) (string, error) {
+func CreateVultrInstance(providerKey, sshKeyID, privKeyPath string, osID int, region, plan, instanceFile, vpsName string) (string, error) {
 	if providerKey == "" {
 		return "", logger.Errorf("Provider key is empty")
 	}
@@ -487,6 +488,7 @@ func CreateVultrInstance(providerKey string, sshKeyID string, privKeyPath string
 		PrivKeyPath:     privKeyPath,
 		DefaultPassword: parsed.Instance.DefaultPassword,
 		Provider:        "Vultr",
+		VPSName:         vpsName,
 	}
 
 	var all VultrInstancesToml
@@ -509,7 +511,7 @@ func CreateVultrInstance(providerKey string, sshKeyID string, privKeyPath string
 
 	// Run Ansible post-provisioning setup
 	if finalIP != "" && finalIP != "pending" {
-		if err := utils.SetupPostProvisioningAnsible(finalIP, privKeyPath, vps.Label); err != nil {
+		if err := utils.SetupPostProvisioningAnsible(finalIP, privKeyPath, vpsName); err != nil {
 			logger.Warn("Post-provisioning setup failed: " + err.Error())
 		}
 	}
@@ -629,7 +631,8 @@ func DestroyVultr(providerKey string, instanceID string, instanceFile string) er
 	// Get SSH key ID and private key path for cleanup
 	var sshKeyID string
 	var privKeyPath string
-	if instance, exists := instances[instanceID]; exists {
+	instance, exists := instances[instanceID]
+	if exists {
 		sshKeyID = instance.SSHKeyID
 		privKeyPath = instance.PrivKeyPath
 	}
@@ -669,6 +672,32 @@ func DestroyVultr(providerKey string, instanceID string, instanceFile string) er
 			// Don't warn about this as it might not exist
 		} else {
 			logger.Info("Deleted passphrase file: " + logger.Highlight(passPhraseFile))
+		}
+	}
+
+	// Delete the WireGuard client config if it exists
+	if exists {
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			var wgConfigPath string
+			if instance.VPSName != "" {
+				// Use VPSName if available (new instances)
+				wgConfigPath = filepath.Join(homeDir, ".config", "vps", "wg", instance.VPSName+".conf")
+			} else if instance.Ipv4 != "" && instance.Ipv4 != "pending" {
+				// Fallback to IP-based name for backward compatibility
+				wgConfigPath = filepath.Join(homeDir, ".config", "vps", "wg", "client-"+instance.Ipv4+".conf")
+			}
+
+			if wgConfigPath != "" {
+				if err := os.Remove(wgConfigPath); err != nil {
+					// Check if file exists before warning
+					if !os.IsNotExist(err) {
+						logger.Warn("Failed to delete WireGuard config: " + err.Error())
+					}
+				} else {
+					logger.Info("Deleted WireGuard config: " + logger.Highlight(wgConfigPath))
+				}
+			}
 		}
 	}
 
