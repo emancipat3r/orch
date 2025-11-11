@@ -525,8 +525,9 @@ func setupWireGuard(vpsName, netnsName string) error {
 	logger.Info("Setting up WireGuard: " + logger.Highlight(netnsName))
 
 	// 0) Idempotent: create-or-reuse WG link in root ns
-	if _, err := netlink.LinkByName(netnsName); err != nil {
-		if _, cerr := utils.CreateWgInt(netnsName); cerr != nil {
+ linkName := "wg-" + netnsName
+	if _, err := netlink.LinkByName(linkName); err != nil {
+		if _, cerr := utils.CreateWgInt(linkName); cerr != nil {
 			return cerr
 		}
 	}
