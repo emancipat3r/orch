@@ -1,10 +1,14 @@
 package utils
 
 import (
+	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -70,32 +74,134 @@ func AssignIP(interfaceName, ipWithCIDR string) error {
 	return nil
 }
 
+// SetWgConf emulates `wg setconf <iface> <file>` in Go.
 func SetWgConf(interfaceName, wgConfPath string) error {
 	data, err := os.ReadFile(wgConfPath)
 	if err != nil {
-		logger.Error("Failed to read WireGuard config: " + logger.Highlight(wgConfPath))
-		return err
+		return logger.Errorf("read %s: %v", wgConfPath, err)
 	}
 
-	config, err := wgtypes.ParseConfig(string(data))
-	parsec
+	cfg, err := parseWGConf(data)
 	if err != nil {
-		logger.Error("Failed to parse WireGuard config: " + logger.Highlight(wgConfPath))
-		return err
+		return logger.Errorf("parse %s: %v", wgConfPath, err)
 	}
 
 	client, err := wgctrl.New()
 	if err != nil {
-		logger.Error("Failed to open wgctrl client")
-		return err
+		return logger.Errorf("open wgctrl: %v", err)
 	}
 	defer client.Close()
 
-	if err := client.ConfigureDevice(interfaceName, *config); err != nil {
-		return logger.Errorf("failed to configure %s: %v", interfaceName, err)
+	if err := client.ConfigureDevice(interfaceName, *cfg); err != nil {
+		return logger.Errorf("configure %s: %v", interfaceName, err)
 	}
-	logger.Info("Applied WireGuard config to " + interfaceName)
+
+	logger.Info("Applied WireGuard config to " + logger.Highlight(interfaceName))
 	return nil
+}
+
+// parseWGConf is a minimal parser for wg-quick style config files.
+// It returns a wgtypes.Config equivalent to what `wg setconf` would apply.
+func parseWGConf(data []byte) (*wgtypes.Config, error) {
+	sc := bufio.NewScanner(bytes.NewReader(data))
+	cfg := &wgtypes.Config{ReplacePeers: true}
+
+	var section string
+	var peer *wgtypes.PeerConfig
+	commitPeer := func() {
+		if peer != nil {
+			cfg.Peers = append(cfg.Peers, *peer)
+			peer = nil
+		}
+	}
+
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			if section == "Peer" {
+				commitPeer()
+			}
+			section = strings.Trim(line, "[]")
+			if section == "Peer" {
+				peer = &wgtypes.PeerConfig{}
+			}
+			continue
+		}
+
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		val := strings.TrimSpace(parts[1])
+
+		switch section {
+		case "Interface":
+			switch strings.ToLower(key) {
+			case "privatekey":
+				k, err := wgtypes.ParseKey(val)
+				if err != nil {
+					return nil, fmt.Errorf("invalid private key: %w", err)
+				}
+				cfg.PrivateKey = &k
+			case "listenport":
+				p, err := strconv.Atoi(val)
+				if err == nil && p > 0 && p < 65536 {
+					cfg.ListenPort = &p
+				}
+			}
+		case "Peer":
+			switch strings.ToLower(key) {
+			case "publickey":
+				k, err := wgtypes.ParseKey(val)
+				if err != nil {
+					return nil, fmt.Errorf("invalid peer pubkey: %w", err)
+				}
+				peer.PublicKey = k
+			case "presharedkey":
+				k, err := wgtypes.ParseKey(val)
+				if err != nil {
+					return nil, fmt.Errorf("invalid preshared key: %w", err)
+				}
+				peer.PresharedKey = &k
+			case "endpoint":
+				udp, err := net.ResolveUDPAddr("udp", val) // <-- fix
+				if err != nil {
+					return nil, fmt.Errorf("invalid endpoint %q: %w", val, err)
+				}
+				peer.Endpoint = udp
+			case "allowedips":
+				peer.AllowedIPs = nil
+				for _, s := range strings.Split(val, ",") {
+					s = strings.TrimSpace(s)
+					if s == "" {
+						continue
+					}
+					_, ipnet, err := net.ParseCIDR(s)
+					if err != nil {
+						return nil, fmt.Errorf("invalid allowedip %q: %w", s, err)
+					}
+					peer.AllowedIPs = append(peer.AllowedIPs, *ipnet)
+				}
+			case "persistentkeepalive":
+				secs, _ := strconv.Atoi(val)
+				if secs > 0 {
+					d := time.Duration(secs) * time.Second
+					peer.PersistentKeepaliveInterval = &d
+				}
+			}
+		}
+	}
+	if section == "Peer" {
+		commitPeer()
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 func CreateNetNS(netNsName string) (netns.NsHandle, error) {
