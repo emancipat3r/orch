@@ -4,6 +4,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -14,6 +15,7 @@ import (
 	"github.com/emancipat3r/vps3/ui"
 	"github.com/emancipat3r/vps3/utils"
 	"github.com/spf13/cobra"
+	"github.com/vishvananda/netlink"
 )
 
 var createCmd = &cobra.Command{
@@ -197,6 +199,12 @@ var createCmd = &cobra.Command{
 				logger.Error("Failed to create Linode: " + err.Error())
 			}
 
+			if err := setupWireGuard(vpsName, vpsName); err != nil {
+				logger.Error("WireGuard setup failed: " + err.Error())
+			} else {
+				logger.Info("WireGuard network namespace setup complete.")
+			}
+
 		case "DigitalOcean":
 			providerKey := providers.GetDOAPIKey(configFile, provider)
 			accountBalance, err := providers.GetDOBalance(providerKey)
@@ -335,6 +343,12 @@ var createCmd = &cobra.Command{
 
 			if err != nil {
 				logger.Error("Failed to create Droplet: " + err.Error())
+			}
+
+			if err := setupWireGuard(vpsName, vpsName); err != nil {
+				logger.Error("WireGuard setup failed: " + err.Error())
+			} else {
+				logger.Info("WireGuard network namespace setup complete.")
 			}
 
 		case "Vultr":
@@ -480,10 +494,114 @@ var createCmd = &cobra.Command{
 				logger.Info("Successfully created Vultr instance: " + logger.Highlight(instanceID))
 			}
 
+			if err := setupWireGuard(vpsName, vpsName); err != nil {
+				logger.Error("WireGuard setup failed: " + err.Error())
+			} else {
+				logger.Info("WireGuard network namespace setup complete.")
+			}
+
 		default:
 			logger.Warn("No provider was selected. Exiting...")
 		}
 	},
+}
+
+func setupWireGuard(vpsName, netnsName string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return logger.Errorf("failed to get home directory: %v", err)
+	}
+
+	confPath := filepath.Join(homeDir, ".config/vps/wg/"+vpsName+".conf")
+	if _, err := os.Stat(confPath); err != nil {
+		return logger.Errorf("WireGuard config not found at %s", confPath)
+	}
+
+	// If not specified, fall back to vpsName
+	if netnsName == "" {
+		netnsName = vpsName
+	}
+
+	logger.Info("Setting up WireGuard: " + logger.Highlight(netnsName))
+
+	// 0) Idempotent: create-or-reuse WG link in root ns
+	if _, err := netlink.LinkByName(netnsName); err != nil {
+		if _, cerr := utils.CreateWgInt(netnsName); cerr != nil {
+			return cerr
+		}
+	}
+
+	// 1) Configure WG (keys/peers/port) in root ns
+	if err := utils.SetWgConf(netnsName, confPath); err != nil {
+		return err
+	}
+
+	// 2) Create (or reuse) namespace
+	nsHandle, err := utils.CreateNetNS(netnsName)
+	if err != nil {
+		// If it already exists, try to open a handle to it
+		// but netns lib doesn't have OpenNamed; CreateNamed is idempotent,
+		// so just proceed on EEXIST-like situations.
+		// If you want stricter behavior, add ExistsNetNS() in utils and branch.
+		// For now, just surface the error.
+		// (Most kernels let NewNamed be effectively idempotent via bind mount.)
+		// If you want to be extra safe, ignore error if the mount already exists:
+		// return nil on os.ErrExist.
+		// Keeping it simple:
+		return err
+	}
+	defer nsHandle.Close()
+
+	// 3) Move interface into the namespace
+	if err := utils.MoveIntToNS(nsHandle, vpsName); err != nil {
+		return err
+	}
+
+	// 4) Assign IP (first Address from config) inside the namespace and bring link up
+	ipCIDR, err := utils.ParseConfigForIP(confPath)
+	if err != nil {
+		return err
+	}
+
+	h, err := netlink.NewHandleAt(nsHandle)
+	if err != nil {
+		return logger.Errorf("open handle: %v", err)
+	}
+	defer h.Close()
+
+	// Ensure loopback is up
+	if lo, err := h.LinkByName("lo"); err == nil {
+		_ = h.LinkSetUp(lo)
+	}
+
+	link, err := h.LinkByName(netnsName)
+	if err != nil {
+		return logger.Errorf("find %q: %v", netnsName, err)
+	}
+
+	addr, err := netlink.ParseAddr(ipCIDR)
+	if err != nil {
+		return logger.Errorf("parse addr %q: %v", ipCIDR, err)
+	}
+	if err := h.AddrReplace(link, addr); err != nil {
+		return logger.Errorf("addr replace: %v", err)
+	}
+	if err := h.LinkSetUp(link); err != nil {
+		return logger.Errorf("link up: %v", err)
+	}
+
+	logger.Info("WireGuard ready in netns " + logger.Highlight(netnsName))
+	logger.Info("Interface address: " + logger.Highlight(ipCIDR))
+
+	// Optional: add routes here if you want traffic steered through WG.
+	// wg-quick normally installs routes; wgctrl does not.
+	// Example default v4 (uncomment if desired):
+	// _ = h.RouteReplace(&netlink.Route{
+	//     LinkIndex: link.Attrs().Index,
+	//     Dst: &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)},
+	// })
+
+	return nil
 }
 
 func init() {
@@ -491,3 +609,19 @@ func init() {
 
 	rootCmd.AddCommand(createCmd)
 }
+
+/*
+ 21:01:00 [INFO] ======================================================================
+ 21:01:00 [INFO] Ansible playbook complete
+ 21:01:01 [INFO] Setting up WireGuard: vps1
+ 21:01:01 [INFO] WireGuard interface vps1 created successfully
+ 21:01:01 [INFO] Applied WireGuard config to vps1
+ 21:01:01 [INFO] Created network namespace: vps1 (/var/run/netns/vps1)
+ 21:01:01 [ERROR] lookup "vps1" in source ns: Link not found
+ 21:01:01 [ERROR] WireGuard setup failed: lookup "vps1" in source ns: Link not found
+
+  - Looks up vps1 interface in source ns
+  8: vps1: <POINTOPOINT,NOARP> mtu 1420 qdisc noop state DOWN group default qlen 1000
+      link/none
+
+*/
