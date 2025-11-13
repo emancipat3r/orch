@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"io/ioutil"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -517,49 +518,39 @@ func setupWireGuard(vpsName, netnsName string) error {
 		return logger.Errorf("WireGuard config not found at %s", confPath)
 	}
 
-	// If not specified, fall back to vpsName
 	if netnsName == "" {
 		netnsName = vpsName
 	}
 
+	// Single source of truth for link name
+	linkName := "wg-" + netnsName
+
 	logger.Info("Setting up WireGuard: " + logger.Highlight(netnsName))
 
-	// 0) Idempotent: create-or-reuse WG link in root ns
- linkName := "wg-" + netnsName
-	if _, err := netlink.LinkByName(linkName); err != nil {
-		if _, cerr := utils.CreateWgInt(linkName); cerr != nil {
-			return cerr
-		}
-	}
-
-	// 1) Configure WG (keys/peers/port) in root ns
-	if err := utils.SetWgConf(netnsName, confPath); err != nil {
+	// 1) Create interface in host ns
+	if _, err := utils.CreateWgInt(linkName); err != nil {
 		return err
 	}
 
-	// 2) Create (or reuse) namespace
+	// 2) Configure WG on that iface
+	if err := utils.SetWgConf(linkName, confPath); err != nil {
+		return err
+	}
+
+	// 3) Create namespace
 	nsHandle, err := utils.CreateNetNS(netnsName)
 	if err != nil {
-		// If it already exists, try to open a handle to it
-		// but netns lib doesn't have OpenNamed; CreateNamed is idempotent,
-		// so just proceed on EEXIST-like situations.
-		// If you want stricter behavior, add ExistsNetNS() in utils and branch.
-		// For now, just surface the error.
-		// (Most kernels let NewNamed be effectively idempotent via bind mount.)
-		// If you want to be extra safe, ignore error if the mount already exists:
-		// return nil on os.ErrExist.
-		// Keeping it simple:
 		return err
 	}
 	defer nsHandle.Close()
 
-	// 3) Move interface into the namespace
-	if err := utils.MoveIntToNS(nsHandle, vpsName); err != nil {
+	// 4) Move interface into namespace
+	if err := utils.MoveIntToNS(nsHandle, linkName); err != nil {
 		return err
 	}
 
-	// 4) Assign IP (first Address from config) inside the namespace and bring link up
-	ipCIDR, err := utils.ParseConfigForIP(confPath)
+	// 5) Assign IP in that namespace
+	ip, err := utils.ParseConfigForIP(confPath)
 	if err != nil {
 		return err
 	}
@@ -570,19 +561,18 @@ func setupWireGuard(vpsName, netnsName string) error {
 	}
 	defer h.Close()
 
-	// Ensure loopback is up
 	if lo, err := h.LinkByName("lo"); err == nil {
 		_ = h.LinkSetUp(lo)
 	}
 
-	link, err := h.LinkByName(netnsName)
+	link, err := h.LinkByName(linkName)
 	if err != nil {
-		return logger.Errorf("find %q: %v", netnsName, err)
+		return logger.Errorf("find %q: %v", linkName, err)
 	}
 
-	addr, err := netlink.ParseAddr(ipCIDR)
+	addr, err := netlink.ParseAddr(ip)
 	if err != nil {
-		return logger.Errorf("parse addr %q: %v", ipCIDR, err)
+		return logger.Errorf("parse addr %q: %v", ip, err)
 	}
 	if err := h.AddrReplace(link, addr); err != nil {
 		return logger.Errorf("addr replace: %v", err)
@@ -591,17 +581,32 @@ func setupWireGuard(vpsName, netnsName string) error {
 		return logger.Errorf("link up: %v", err)
 	}
 
+	// 6) Add default routes through wg-vps1
+
+	// IPv4 default: 0.0.0.0/0 via wg-vps1
+	v4Route := &netlink.Route{
+		LinkIndex: link.Attrs().Index,
+		Dst: &net.IPNet{
+			IP:   net.IPv4zero,
+			Mask: net.CIDRMask(0, 32),
+		},
+	}
+	if err := h.RouteReplace(v4Route); err != nil {
+		return logger.Errorf("add default v4 route via %s: %v", linkName, err)
+	}
+
+	// Optional IPv6 default: ::/0 via wg-vps1
+	v6Route := &netlink.Route{
+		LinkIndex: link.Attrs().Index,
+		Dst: &net.IPNet{
+			IP:   net.ParseIP("::"),
+			Mask: net.CIDRMask(0, 128),
+		},
+	}
+	_ = h.RouteReplace(v6Route)
+
 	logger.Info("WireGuard ready in netns " + logger.Highlight(netnsName))
-	logger.Info("Interface address: " + logger.Highlight(ipCIDR))
-
-	// Optional: add routes here if you want traffic steered through WG.
-	// wg-quick normally installs routes; wgctrl does not.
-	// Example default v4 (uncomment if desired):
-	// _ = h.RouteReplace(&netlink.Route{
-	//     LinkIndex: link.Attrs().Index,
-	//     Dst: &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)},
-	// })
-
+	logger.Info("Interface " + logger.Highlight(linkName) + " address: " + logger.Highlight(ip))
 	return nil
 }
 
@@ -610,19 +615,3 @@ func init() {
 
 	rootCmd.AddCommand(createCmd)
 }
-
-/*
- 21:01:00 [INFO] ======================================================================
- 21:01:00 [INFO] Ansible playbook complete
- 21:01:01 [INFO] Setting up WireGuard: vps1
- 21:01:01 [INFO] WireGuard interface vps1 created successfully
- 21:01:01 [INFO] Applied WireGuard config to vps1
- 21:01:01 [INFO] Created network namespace: vps1 (/var/run/netns/vps1)
- 21:01:01 [ERROR] lookup "vps1" in source ns: Link not found
- 21:01:01 [ERROR] WireGuard setup failed: lookup "vps1" in source ns: Link not found
-
-  - Looks up vps1 interface in source ns
-  8: vps1: <POINTOPOINT,NOARP> mtu 1420 qdisc noop state DOWN group default qlen 1000
-      link/none
-
-*/
