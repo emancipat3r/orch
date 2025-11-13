@@ -93,11 +93,12 @@ func SetWgConf(interfaceName, wgConfPath string) error {
 	defer client.Close()
 
 	if err := client.ConfigureDevice(interfaceName, *cfg); err != nil {
-		return logger.Errorf("configure %s: %v", interfaceName, err)
+		return logger.Errorf("Failed to configure %s: %v", interfaceName, err)
 	}
 
 	logger.Info("Applied WireGuard config to " + logger.Highlight(interfaceName))
 	return nil
+
 }
 
 // parseWGConf is a minimal parser for wg-quick style config files.
@@ -211,27 +212,41 @@ func CreateNetNS(netNsName string) (netns.NsHandle, error) {
 		return -1, fmt.Errorf("failed to ensure /var/run/netns: %w", err)
 	}
 
+	// Save current namespace
+	orig, err := netns.Get()
+	if err != nil {
+		return -1, fmt.Errorf("failed to get current netns: %w", err)
+	}
+	defer orig.Close()
+
+	// Create named namespace (this likely moves us into the new one)
 	newNs, err := netns.NewNamed(netNsName)
 	if err != nil {
 		return -1, fmt.Errorf("failed to create netns %q: %w", netNsName, err)
+	}
+
+	// Restore original ns so future calls (like LinkByName) see host interfaces
+	if err := netns.Set(orig); err != nil {
+		newNs.Close()
+		return -1, fmt.Errorf("failed to restore original netns: %w", err)
 	}
 
 	logger.Info("Created network namespace: " + logger.Highlight(netNsName) + " (" + nsPath + ")")
 	return newNs, nil
 }
 
-// MoveIntToNS moves an interface (e.g., "wg0") into nsHandle and brings it up there.
-func MoveIntToNS(nsHandle netns.NsHandle, interfaceName string) error {
-	// Lookup in current ns
-	link, err := netlink.LinkByName(interfaceName)
+// MoveIntToNS moves an interface into specified netns and brings it up in there
+func MoveIntToNS(nsHandle netns.NsHandle, linkName string) error {
+	// Lookup in current (host) ns
+	link, err := netlink.LinkByName(linkName)
 	if err != nil {
-		return logger.Errorf("lookup %q in source ns: %v", interfaceName, err)
+		return logger.Errorf("Failed lookup of interface %q in host netns: %v", linkName, err)
 	}
 
 	_ = netlink.LinkSetDown(link)
 
 	if err := netlink.LinkSetNsFd(link, int(nsHandle)); err != nil {
-		return logger.Errorf("move %q to target ns: %v", interfaceName, err)
+		return logger.Errorf("Moved %q to target ns: %v", linkName, err)
 	}
 
 	// Work inside target ns without changing process-wide ns
@@ -241,15 +256,15 @@ func MoveIntToNS(nsHandle netns.NsHandle, interfaceName string) error {
 	}
 	defer h.Close()
 
-	moved, err := h.LinkByName(interfaceName)
+	moved, err := h.LinkByName(linkName)
 	if err != nil {
-		return logger.Errorf("find %q in target ns after move: %v", interfaceName, err)
+		return logger.Errorf("find %q in target ns after move: %v", linkName, err)
 	}
 	if err := h.LinkSetUp(moved); err != nil {
-		return logger.Errorf("set %q up in target ns: %v", interfaceName, err)
+		return logger.Errorf("set %q up in target ns: %v", linkName, err)
 	}
 
-	logger.Info("Moved " + logger.Highlight(interfaceName) + " to target ns and set it UP")
+	logger.Info("Moved " + logger.Highlight(linkName) + " to target ns and set it UP")
 	return nil
 }
 
