@@ -513,7 +513,7 @@ func setupWireGuard(vpsName, netnsName string) error {
 		return logger.Errorf("failed to get home directory: %v", err)
 	}
 
-	confPath := filepath.Join(homeDir, ".config/vps/wg/"+vpsName+".conf")
+	confPath := filepath.Join(homeDir, ".config/vps/wg", vpsName+".conf")
 	if _, err := os.Stat(confPath); err != nil {
 		return logger.Errorf("WireGuard config not found at %s", confPath)
 	}
@@ -522,39 +522,41 @@ func setupWireGuard(vpsName, netnsName string) error {
 		netnsName = vpsName
 	}
 
-	// Single source of truth for link name
 	linkName := "wg-" + netnsName
-
 	logger.Info("Setting up WireGuard: " + logger.Highlight(netnsName))
 
-	// 1) Create interface in host ns
+	// 1) Create WG link in host ns
 	if _, err := utils.CreateWgInt(linkName); err != nil {
 		return err
 	}
 
-	// 2) Configure WG on that iface
+	// 2) Apply WireGuard config
 	if err := utils.SetWgConf(linkName, confPath); err != nil {
 		return err
 	}
 
-	// 3) Create namespace
+	// 3) Create netns
 	nsHandle, err := utils.CreateNetNS(netnsName)
 	if err != nil {
 		return err
 	}
 	defer nsHandle.Close()
 
-	// 4) Move interface into namespace
+	// 4) Per-netns DNS
+	dnsServers, err := utils.ParseDNSFromConfig(confPath)
+	if err != nil {
+		dnsServers = []string{"1.1.1.1"}
+	}
+	if err := utils.EnsureNetnsResolvConf(netnsName, dnsServers); err != nil {
+		return err
+	}
+
+	// 5) Move iface into netns
 	if err := utils.MoveIntToNS(nsHandle, linkName); err != nil {
 		return err
 	}
 
-	// 5) Assign IP in that namespace
-	ip, err := utils.ParseConfigForIP(confPath)
-	if err != nil {
-		return err
-	}
-
+	// 6) Configure IP + routes inside netns
 	h, err := netlink.NewHandleAt(nsHandle)
 	if err != nil {
 		return logger.Errorf("open handle: %v", err)
@@ -563,6 +565,11 @@ func setupWireGuard(vpsName, netnsName string) error {
 
 	if lo, err := h.LinkByName("lo"); err == nil {
 		_ = h.LinkSetUp(lo)
+	}
+
+	ip, err := utils.ParseConfigForIP(confPath)
+	if err != nil {
+		return err
 	}
 
 	link, err := h.LinkByName(linkName)
@@ -581,9 +588,7 @@ func setupWireGuard(vpsName, netnsName string) error {
 		return logger.Errorf("link up: %v", err)
 	}
 
-	// 6) Add default routes through wg-vps1
-
-	// IPv4 default: 0.0.0.0/0 via wg-vps1
+	// IPv4 default route
 	v4Route := &netlink.Route{
 		LinkIndex: link.Attrs().Index,
 		Dst: &net.IPNet{
@@ -595,7 +600,7 @@ func setupWireGuard(vpsName, netnsName string) error {
 		return logger.Errorf("add default v4 route via %s: %v", linkName, err)
 	}
 
-	// Optional IPv6 default: ::/0 via wg-vps1
+	// IPv6 default (best-effort)
 	v6Route := &netlink.Route{
 		LinkIndex: link.Attrs().Index,
 		Dst: &net.IPNet{

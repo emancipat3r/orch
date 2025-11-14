@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/signal"
 	"os/user"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -11,7 +12,9 @@ import (
 	"github.com/emancipat3r/vps3/logger"
 	"github.com/emancipat3r/vps3/providers"
 	"github.com/emancipat3r/vps3/ui"
+	"github.com/emancipat3r/vps3/utils"
 	"github.com/spf13/cobra"
+	"github.com/vishvananda/netns"
 )
 
 var destroyCmd = &cobra.Command{
@@ -95,11 +98,11 @@ var destroyCmd = &cobra.Command{
 				logger.Info("(" + strconv.Itoa(i+1) + "/" + strconv.Itoa(len(selectedInstances)) + ") Destroying Linode: " + logger.Highlight(instanceID))
 
 				_, err = providers.DestroyLinode(providerKey, instanceID, instanceFile)
-
 				if err != nil {
 					logger.Error("Failed to destroy Linode " + instanceID + ": " + err.Error())
 				} else {
 					logger.Info("Successfully destroyed Linode: " + logger.Highlight(instanceID))
+					tearDownLocalForInstance(instanceID)
 				}
 			}
 
@@ -170,11 +173,36 @@ var destroyCmd = &cobra.Command{
 				logger.Info("(" + strconv.Itoa(i+1) + "/" + strconv.Itoa(len(selectedInstances)) + ") Destroying droplet: " + logger.Highlight(instanceID))
 
 				_, err = providers.DestroyDroplet(providerKey, instanceID, instanceFile)
-
 				if err != nil {
 					logger.Error("Failed to destroy droplet " + instanceID + ": " + err.Error())
 				} else {
 					logger.Info("Successfully destroyed droplet: " + logger.Highlight(instanceID))
+					tearDownLocalForInstance(instanceID)
+				}
+			}
+
+			for i, selectedInstance := range selectedInstances {
+				selectedInstanceSplit := strings.Split(selectedInstance, " ")
+				instanceID := selectedInstanceSplit[2]
+
+				// grab vps_name BEFORE destroying / updating instances.toml
+				vpsName, err := utils.GetVPSNameForInstance(instanceFile, instanceID)
+				if err != nil {
+					logger.Debug("No local vps_name mapping for instance " + instanceID + ": " + err.Error())
+				}
+
+				logger.Info("(" + strconv.Itoa(i+1) + "/" + strconv.Itoa(len(selectedInstances)) + ") Destroying droplet: " + logger.Highlight(instanceID))
+
+				_, err = providers.DestroyDroplet(providerKey, instanceID, instanceFile)
+				if err != nil {
+					logger.Error("Failed to destroy droplet " + instanceID + ": " + err.Error())
+					continue
+				}
+
+				logger.Info("Successfully destroyed droplet: " + logger.Highlight(instanceID))
+
+				if vpsName != "" {
+					tearDownLocalByName(vpsName) // new helper that doesn’t look in instances.toml
 				}
 			}
 
@@ -239,11 +267,11 @@ var destroyCmd = &cobra.Command{
 				logger.Info("(" + strconv.Itoa(i+1) + "/" + strconv.Itoa(len(selectedInstances)) + ") Destroying Vultr instance: " + logger.Highlight(instanceID))
 
 				err = providers.DestroyVultr(providerKey, instanceID, instanceFile)
-
 				if err != nil {
 					logger.Error("Failed to destroy Vultr instance " + instanceID + ": " + err.Error())
 				} else {
 					logger.Info("Successfully destroyed Vultr instance: " + logger.Highlight(instanceID))
+					tearDownLocalForInstance(instanceID)
 				}
 			}
 
@@ -252,6 +280,59 @@ var destroyCmd = &cobra.Command{
 			logger.Warn("No provider was selected. Exiting...")
 		}
 	},
+}
+
+func tearDownLocalForInstance(instanceID string) {
+	// Map provider instance ID -> vps_name via instances.toml
+	nsName, err := utils.GetVPSNameForInstance(instanceFile, instanceID)
+	if err != nil {
+		logger.Debug("No local netns mapping for instance " + instanceID + ": " + err.Error())
+		return
+	}
+	if nsName == "" {
+		return
+	}
+
+	logger.Info("Tearing down local WireGuard/netns for " + logger.Highlight(nsName))
+
+	// 1) Tear down network namespace (uses your existing utils.TearDownNamespace)
+	if err := utils.TearDownNamespace(nsName, netns.None()); err != nil {
+		logger.Error("Failed to tear down netns " + nsName + ": " + err.Error())
+	}
+
+	// 2) Remove /etc/netns/<nsName>/resolv.conf and dir
+	nsDir := filepath.Join("/etc/netns", nsName)
+	_ = os.Remove(filepath.Join(nsDir, "resolv.conf"))
+	_ = os.Remove(nsDir)
+
+	// 3) Remove wg client config: ~/.config/vps/wg/<vps_name>.conf
+	u, err := user.Current()
+	if err == nil {
+		wgConf := filepath.Join(u.HomeDir, ".config/vps/wg", nsName+".conf")
+		_ = os.Remove(wgConf)
+	}
+
+	logger.Info("Local WireGuard/netns cleaned up for " + logger.Highlight(nsName))
+}
+
+func tearDownLocalByName(nsName string) {
+	logger.Info("Tearing down local WireGuard/netns for " + logger.Highlight(nsName))
+
+	if err := utils.TearDownNamespace(nsName, netns.None()); err != nil {
+		logger.Error("Failed to tear down netns " + nsName + ": " + err.Error())
+	}
+
+	nsDir := filepath.Join("/etc/netns", nsName)
+	_ = os.Remove(filepath.Join(nsDir, "resolv.conf"))
+	_ = os.Remove(nsDir)
+
+	u, err := user.Current()
+	if err == nil {
+		wgConf := filepath.Join(u.HomeDir, ".config/vps/wg", nsName+".conf")
+		_ = os.Remove(wgConf)
+	}
+
+	logger.Info("Local WireGuard/netns cleaned up for " + logger.Highlight(nsName))
 }
 
 func init() {

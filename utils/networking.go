@@ -320,3 +320,60 @@ func TearDownNamespace(netNsName string, h netns.NsHandle) error {
 func isBusy(err error) bool {
 	return errors.Is(err, unix.EBUSY)
 }
+
+func ParseDNSFromConfig(configPath string) ([]string, error) {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToLower(line), "dns =") {
+			val := strings.TrimSpace(strings.TrimPrefix(line, "DNS ="))
+			if val == "" {
+				continue
+			}
+			var servers []string
+			for _, part := range strings.Split(val, ",") {
+				s := strings.TrimSpace(part)
+				if s != "" {
+					servers = append(servers, s)
+				}
+			}
+			if len(servers) == 0 {
+				return nil, errors.New("DNS line present but no servers parsed")
+			}
+			return servers, nil
+		}
+	}
+	return nil, errors.New("DNS not found in WireGuard config")
+}
+
+func EnsureNetnsResolvConf(netnsName string, nameservers []string) error {
+	if len(nameservers) == 0 {
+		nameservers = []string{"1.1.1.1"}
+	}
+
+	dir := filepath.Join("/etc/netns", netnsName)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return logger.Errorf("create /etc/netns dir: %v", err)
+	}
+
+	resolvPath := filepath.Join(dir, "resolv.conf")
+
+	var sb strings.Builder
+	for _, ns := range nameservers {
+		sb.WriteString("nameserver ")
+		sb.WriteString(ns)
+		sb.WriteString("\n")
+	}
+
+	if err := os.WriteFile(resolvPath, []byte(sb.String()), 0o644); err != nil {
+		return logger.Errorf("write %s: %v", resolvPath, err)
+	}
+
+	logger.Info("Wrote per-netns resolv.conf for " +
+		logger.Highlight(netnsName) + " at " + logger.Highlight(resolvPath))
+	return nil
+}
