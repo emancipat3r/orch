@@ -1,4 +1,4 @@
-module github.com/emancipat3r/vps3
+module vps
 
 go 1.24.0
 
@@ -9,6 +9,7 @@ require (
 	github.com/charmbracelet/huh v0.7.0
 	github.com/charmbracelet/keygen v0.5.3
 	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/emancipat3r/vps3 v0.0.0-00010101000000-000000000000
 	github.com/spf13/cobra v1.9.1
 	github.com/vishvananda/netlink v1.3.1
 	github.com/vishvananda/netns v0.0.5

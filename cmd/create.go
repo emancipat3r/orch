@@ -530,33 +530,42 @@ func setupWireGuard(vpsName, netnsName string) error {
 		return err
 	}
 
-	// 2) Apply WireGuard config
+	// 2) Set MTU before applying config (1420 is optimal for WireGuard over typical networks)
+	link, err := netlink.LinkByName(linkName)
+	if err != nil {
+		return logger.Errorf("failed to get link %s: %v", linkName, err)
+	}
+	if err := netlink.LinkSetMTU(link, 1420); err != nil {
+		return logger.Errorf("failed to set MTU on %s: %v", linkName, err)
+	}
+
+	// 3) Apply WireGuard config
 	if err := utils.SetWgConf(linkName, confPath); err != nil {
 		return err
 	}
 
-	// 3) Create netns
+	// 4) Create netns
 	nsHandle, err := utils.CreateNetNS(netnsName)
 	if err != nil {
 		return err
 	}
 	defer nsHandle.Close()
 
-	// 4) Per-netns DNS
+	// 5) Per-netns DNS
 	dnsServers, err := utils.ParseDNSFromConfig(confPath)
 	if err != nil {
-		dnsServers = []string{"1.1.1.1"}
+		dnsServers = []string{"1.1.1.1", "1.0.0.1"}
 	}
 	if err := utils.EnsureNetnsResolvConf(netnsName, dnsServers); err != nil {
 		return err
 	}
 
-	// 5) Move iface into netns
+	// 6) Move iface into netns
 	if err := utils.MoveIntToNS(nsHandle, linkName); err != nil {
 		return err
 	}
 
-	// 6) Configure IP + routes inside netns
+	// 7) Configure IP + routes inside netns
 	h, err := netlink.NewHandleAt(nsHandle)
 	if err != nil {
 		return logger.Errorf("open handle: %v", err)
@@ -572,7 +581,7 @@ func setupWireGuard(vpsName, netnsName string) error {
 		return err
 	}
 
-	link, err := h.LinkByName(linkName)
+	link, err = h.LinkByName(linkName)
 	if err != nil {
 		return logger.Errorf("find %q: %v", linkName, err)
 	}

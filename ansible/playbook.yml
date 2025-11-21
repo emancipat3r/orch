@@ -26,37 +26,85 @@
         msg: "Running on {{ ansible_distribution }} {{ ansible_distribution_version }}"
 
   tasks:
-    - name: Stop and disable unattended-upgrades
+    - name: Stop all apt/dpkg related systemd services and timers
       systemd:
-        name: unattended-upgrades
+        name: "{{ item }}"
         state: stopped
         enabled: no
+      loop:
+        - unattended-upgrades
+        - apt-daily.service
+        - apt-daily.timer
+        - apt-daily-upgrade.service
+        - apt-daily-upgrade.timer
       ignore_errors: yes
 
-    - name: Kill any running apt/dpkg processes
+    - name: Kill all background update processes
       shell: |
+        pkill -9 -f unattended-upgrade || true
         pkill -9 apt-get || true
+        pkill -9 apt || true
         pkill -9 dpkg || true
-        pkill -9 unattended-upgrade || true
-        sleep 2
+        pkill -9 aptd || true
+        systemctl stop packagekit || true
+        pkill -9 packagekit || true
+        systemctl stop snapd || true
+        pkill -9 snapd || true
+        sleep 3
+      args:
+        executable: /bin/bash
+      ignore_errors: yes
+
+    - name: Wait for apt/dpkg locks to be released (with timeout)
+      shell: |
+        set -e
+        MAX_WAIT=300
+        WAITED=0
+        echo "Checking for apt/dpkg locks..."
+        while [ $WAITED -lt $MAX_WAIT ]; do
+          LOCKED=0
+          for lockfile in /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock; do
+            if fuser "$lockfile" >/dev/null 2>&1; then
+              LOCKED=1
+              echo "Lock detected on $lockfile, waiting..."
+              break
+            fi
+          done
+          if [ $LOCKED -eq 0 ]; then
+            echo "All locks released"
+            exit 0
+          fi
+          sleep 5
+          WAITED=$((WAITED + 5))
+        done
+        echo "Timeout waiting for locks, forcing removal..."
+        exit 1
+      args:
+        executable: /bin/bash
+      register: lock_wait
+      changed_when: false
+      failed_when: false
+
+    - name: Force remove lock files if waiting timed out
+      shell: |
+        rm -f /var/lib/dpkg/lock
+        rm -f /var/lib/dpkg/lock-frontend
+        rm -f /var/lib/apt/lists/lock
+        rm -f /var/cache/apt/archives/lock
+        dpkg --configure -a || true
+      args:
+        executable: /bin/bash
+      when: lock_wait.rc != 0
       ignore_errors: yes
 
     - name: Update apt cache
       apt:
         update_cache: yes
         cache_valid_time: 3600
-
-    - name: Wait for apt locks to be released
-      shell: |
-        while fuser /var/lib/dpkg/lock >/dev/null 2>&1 || \
-            fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || \
-            fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do
-          echo "Waiting for other apt operations to complete..."
-          sleep 5
-        done
-      args:
-        executable: /bin/bash
-      changed_when: false
+      retries: 3
+      delay: 10
+      register: apt_update
+      until: apt_update is not failed
 
     - name: Install essential packages
       apt:
@@ -96,6 +144,20 @@
         value: "1"
         state: present
         reload: yes
+
+    - name: Detect primary network interface
+      shell: ip route show default | awk '/default/ {print $5}' | head -n1
+      register: primary_interface
+      changed_when: false
+
+    - name: Display detected primary interface
+      debug:
+        msg: "Primary network interface detected: {{ primary_interface.stdout }}"
+
+    - name: Fail if no primary interface detected
+      fail:
+        msg: "Could not detect primary network interface"
+      when: primary_interface.stdout == ""
 
     - name: Generate WireGuard server private key
       shell: wg genkey
