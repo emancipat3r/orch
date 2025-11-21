@@ -53,27 +53,6 @@ func ParseConfigForIP(configPath string) (string, error) {
 	return "", errors.New("address not found in WireGuard config")
 }
 
-func AssignIP(interfaceName, ipWithCIDR string) error {
-	link, err := netlink.LinkByName(interfaceName)
-	if err != nil {
-		return logger.Errorf("failed to get interface %s: %v", interfaceName, err)
-	}
-	addr, err := netlink.ParseAddr(ipWithCIDR)
-	if err != nil {
-		return logger.Errorf("failed to parse IP address %s: %v", ipWithCIDR, err)
-	}
-	// Replace avoids EEXIST if you re-run
-	if err := netlink.AddrReplace(link, addr); err != nil {
-		return logger.Errorf("failed to assign %s to %s: %v", ipWithCIDR, interfaceName, err)
-	}
-	// Optional: ensure link is up
-	if err := netlink.LinkSetUp(link); err != nil {
-		return logger.Errorf("failed to set %s up: %v", interfaceName, err)
-	}
-	logger.Info("IP address " + ipWithCIDR + " assigned to interface " + interfaceName)
-	return nil
-}
-
 // SetWgConf emulates `wg setconf <iface> <file>` in Go.
 func SetWgConf(interfaceName, wgConfPath string) error {
 	data, err := os.ReadFile(wgConfPath)

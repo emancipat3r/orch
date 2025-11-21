@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/huh"
 )
@@ -71,111 +70,4 @@ func CreateNavigableWizard(steps []WizardStep) (map[string]string, error) {
 	}
 
 	return results, nil
-}
-
-// CreateVPSWizard creates a VPS creation wizard with all steps
-func CreateVPSWizard(providerData map[string]interface{}) (map[string]string, error) {
-	var provider, region, image, size string
-
-	// Extract data from provider data map
-	regionOptions, _ := providerData["regions"].([]string)
-	imageOptions, _ := providerData["images"].([]string)
-	sizeOptions, _ := providerData["sizes"].([]string)
-
-	if regionOptions == nil {
-		regionOptions = []string{"Loading regions..."}
-	}
-	if imageOptions == nil {
-		imageOptions = []string{"Loading images..."}
-	}
-	if sizeOptions == nil {
-		sizeOptions = []string{"Loading sizes..."}
-	}
-
-	steps := []WizardStep{
-		{
-			Key:         "provider",
-			Title:       "Choose your cloud provider",
-			Description: "Select the cloud provider for your VPS",
-			Options:     []string{"DigitalOcean", "Linode", "Vultr"},
-			Value:       &provider,
-		},
-		{
-			Key:         "region",
-			Title:       "Select datacenter region",
-			Description: "Choose the geographical location for your server",
-			Options:     regionOptions,
-			Value:       &region,
-		},
-		{
-			Key:         "image",
-			Title:       "Choose operating system",
-			Description: "Select the OS image for your server",
-			Options:     imageOptions,
-			Value:       &image,
-		},
-		{
-			Key:         "size",
-			Title:       "Select server specifications",
-			Description: "Choose the CPU, RAM, and storage configuration",
-			Options:     sizeOptions,
-			Value:       &size,
-		},
-	}
-
-	return CreateNavigableWizard(steps)
-}
-
-// SimpleConfirmation creates a simple yes/no confirmation dialog
-func SimpleConfirmation(title, description string) (bool, error) {
-	var confirmed bool
-
-	err := huh.NewForm(
-		huh.NewGroup(
-			huh.NewConfirm().
-				Title(title).
-				Description(description).
-				Affirmative("Yes").
-				Negative("No").
-				Value(&confirmed),
-		),
-	).Run()
-
-	if err != nil {
-		return false, err
-	}
-
-	return confirmed, nil
-}
-
-// FormatOptionsForDisplay formats options for better display in the wizard
-func FormatOptionsForDisplay(options []string, maxLength int) []string {
-	formatted := make([]string, len(options))
-	for i, opt := range options {
-		if len(opt) > maxLength {
-			formatted[i] = opt[:maxLength-3] + "..."
-		} else {
-			formatted[i] = opt
-		}
-	}
-	return formatted
-}
-
-// SplitSelectionValue splits a formatted selection value back to its components
-func SplitSelectionValue(selection string) []string {
-	return strings.Fields(selection)
-}
-
-// ParseVPSSelection parses a VPS selection string into its components
-func ParseVPSSelection(selection string) (id, name, ip, region string) {
-	parts := strings.Split(selection, " - ")
-	if len(parts) >= 4 {
-		// Format: "timestamp - id - name - ip - region"
-		if len(parts) >= 5 {
-			return parts[1], parts[2], parts[3], parts[4]
-		}
-		// Format: "id - name - ip - region"
-		return parts[0], parts[1], parts[2], parts[3]
-	}
-	return "", "", "", ""
 }

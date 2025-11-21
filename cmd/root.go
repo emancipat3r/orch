@@ -66,7 +66,21 @@ var rootCmd = &cobra.Command{
 
 		// Check for credentials (config) file
 		if !utils.FileExists(configFile) {
-			logger.Warn("Provider configuration file missing. Exiting...")
+			logger.Warn("Provider configuration file missing.")
+
+			// Try to copy template if it exists
+			templatePath := "templates/configuration.toml"
+			if utils.FileExists(templatePath) {
+				logger.Info("Copying configuration template to: " + logger.Highlight(configFile))
+				if err := utils.CopyFile(templatePath, configFile); err != nil {
+					return fmt.Errorf("failed to copy config template: %w", err)
+				}
+				logger.Info("Configuration template copied successfully!")
+				logger.Warn("Please edit " + logger.Highlight(configFile) + " and add your provider API keys")
+				return fmt.Errorf("configuration file created - please add your API keys and try again")
+			}
+
+			logger.Error("Configuration template not found at: " + templatePath)
 			return fmt.Errorf("missing config file: %s", configFile)
 		}
 		logger.Info("Provider configuration file exists: " + logger.Highlight(configFile))
