@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/emancipat3r/vps3/logger"
-	"github.com/emancipat3r/vps3/ui"
-	"github.com/emancipat3r/vps3/utils"
+	"github.com/emancipat3r/orch/logger"
+	"github.com/emancipat3r/orch/ui"
+	"github.com/emancipat3r/orch/utils"
 )
 
 func GetDOAPIKey(configFile string, provider string) string {
@@ -363,7 +363,7 @@ func CreateDroplet(providerKey string, sshKeyID int, privKeyPath, image, region,
 		Size:    sizeSlug,
 		Image:   image,
 		SSHKeys: []interface{}{sshKeyID},
-		Tags:    []string{"vps3"},
+		Tags:    []string{"orch"},
 	}
 
 	b, _ := json.Marshal(payload)
@@ -781,7 +781,7 @@ func ListDOInstancesTable(providerKey string) (string, error) {
 	}
 
 	// Load existing instances from TOML file to check/update IP addresses
-	instanceFile := os.Getenv("HOME") + "/.config/vps/instances/instances.toml"
+	instanceFile := os.Getenv("HOME") + "/.config/orch/instances/instances.toml"
 	var storedInstances DOInstancesToml
 	var hasChanges bool
 

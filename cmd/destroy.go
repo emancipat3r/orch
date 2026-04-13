@@ -9,10 +9,10 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/emancipat3r/vps3/logger"
-	"github.com/emancipat3r/vps3/providers"
-	"github.com/emancipat3r/vps3/ui"
-	"github.com/emancipat3r/vps3/utils"
+	"github.com/emancipat3r/orch/logger"
+	"github.com/emancipat3r/orch/providers"
+	"github.com/emancipat3r/orch/ui"
+	"github.com/emancipat3r/orch/utils"
 	"github.com/spf13/cobra"
 	"github.com/vishvananda/netns"
 )
@@ -43,9 +43,9 @@ var destroyCmd = &cobra.Command{
 			return
 		}
 
-		pathConfig = filepath.Join(u.HomeDir, ".config/vps/config/")
+		pathConfig = filepath.Join(u.HomeDir, ".config/orch/config/")
 		configFile = filepath.Join(pathConfig, "configuration.toml")
-		pathInstances = filepath.Join(u.HomeDir, ".config/vps/instances/")
+		pathInstances = filepath.Join(u.HomeDir, ".config/orch/instances/")
 		instanceFile = filepath.Join(pathInstances, "instances.toml")
 
 		switch provider {
@@ -301,7 +301,7 @@ func tearDownLocalByName(nsName string) {
 
 	u, err := user.Current()
 	if err == nil {
-		wgConf := filepath.Join(u.HomeDir, ".config/vps/wg", nsName+".conf")
+		wgConf := filepath.Join(u.HomeDir, ".config/orch/wg", nsName+".conf")
 		_ = os.Remove(wgConf)
 	}
 

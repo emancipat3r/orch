@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
-	"github.com/emancipat3r/vps3/logger"
+	"github.com/emancipat3r/orch/logger"
 )
 
 func DirExists(path string) bool {

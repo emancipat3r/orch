@@ -5,9 +5,9 @@ import (
 	"os"
 
 	"github.com/BurntSushi/toml"
-	"github.com/emancipat3r/vps3/logger"
-	"github.com/emancipat3r/vps3/ui"
-	"github.com/emancipat3r/vps3/utils"
+	"github.com/emancipat3r/orch/logger"
+	"github.com/emancipat3r/orch/ui"
+	"github.com/emancipat3r/orch/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -103,10 +103,10 @@ This is useful if the initial setup failed or if you want to reconfigure an inst
 
 		if labelStr, exists := instanceInfo["Label"]; exists {
 			if label, ok = labelStr.(string); !ok {
-				label = "vps-instance"
+				label = "instance"
 			}
 		} else {
-			label = "vps-instance"
+			label = "instance"
 		}
 
 		// Use the label as default if vpsName is not provided via flag

@@ -6,9 +6,9 @@ import (
 	"os/user"
 	"syscall"
 
-	"github.com/emancipat3r/vps3/logger"
-	"github.com/emancipat3r/vps3/providers"
-	"github.com/emancipat3r/vps3/ui"
+	"github.com/emancipat3r/orch/logger"
+	"github.com/emancipat3r/orch/providers"
+	"github.com/emancipat3r/orch/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -40,9 +40,9 @@ var listCmd = &cobra.Command{
 				return
 			}
 
-			pathConfig = user.HomeDir + "/.config/vps/config/"
+			pathConfig = user.HomeDir + "/.config/orch/config/"
 			configFile = pathConfig + "configuration.toml"
-			pathInstances = user.HomeDir + "/.config/vps/instances/"
+			pathInstances = user.HomeDir + "/.config/orch/instances/"
 			instanceFile = pathInstances + "instances.toml"
 
 			providerKey := providers.GetLinodeAPIKey(configFile, provider)
@@ -65,7 +65,7 @@ var listCmd = &cobra.Command{
 				return
 			}
 
-			pathConfig = user.HomeDir + "/.config/vps/config/"
+			pathConfig = user.HomeDir + "/.config/orch/config/"
 			configFile = pathConfig + "configuration.toml"
 
 			providerKey := providers.GetDOAPIKey(configFile, provider)
@@ -90,9 +90,9 @@ var listCmd = &cobra.Command{
 				return
 			}
 
-			pathConfig = user.HomeDir + "/.config/vps/config/"
+			pathConfig = user.HomeDir + "/.config/orch/config/"
 			configFile = pathConfig + "configuration.toml"
-			pathInstances = user.HomeDir + "/.config/vps/instances/"
+			pathInstances = user.HomeDir + "/.config/orch/instances/"
 			instanceFile = pathInstances + "instances.toml"
 
 			providerKey := providers.GetVultrAPIKey(configFile, provider)

@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/emancipat3r/vps3/logger"
-	"github.com/emancipat3r/vps3/ui"
-	"github.com/emancipat3r/vps3/utils"
+	"github.com/emancipat3r/orch/logger"
+	"github.com/emancipat3r/orch/ui"
+	"github.com/emancipat3r/orch/utils"
 )
 
 func GetLinodeAPIKey(configFile string, provider string) string {
@@ -293,7 +293,7 @@ func UploadLinodeSSHKey(providerKey, pubKeyPath string) (int, error) {
 	}
 	pubKey := strings.TrimSpace(string(data))
 
-	keyName := "vps3-" + CreateUID()
+	keyName := "orch-" + CreateUID()
 	payload := LinodeSSHKeyRequest{
 		Label:  keyName,
 		SSHKey: pubKey,
@@ -872,10 +872,10 @@ func DestroyLinode(providerKey, instanceID, instanceFile string) (string, error)
 		var wgConfigPath string
 		if instance.VPSName != "" {
 			// Use VPSName if available (new instances)
-			wgConfigPath = filepath.Join(homeDir, ".config", "vps", "wg", instance.VPSName+".conf")
+			wgConfigPath = filepath.Join(homeDir, ".config", "orch", "wg", instance.VPSName+".conf")
 		} else if instance.Ipv4 != "" && instance.Ipv4 != "pending" {
 			// Fallback to IP-based name for backward compatibility
-			wgConfigPath = filepath.Join(homeDir, ".config", "vps", "wg", "client-"+instance.Ipv4+".conf")
+			wgConfigPath = filepath.Join(homeDir, ".config", "orch", "wg", "client-"+instance.Ipv4+".conf")
 		}
 
 		if wgConfigPath != "" {
