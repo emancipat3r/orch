@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/emancipat3r/vps3/logger"
-	"github.com/emancipat3r/vps3/ui"
-	"github.com/emancipat3r/vps3/utils"
+	"github.com/emancipat3r/orch/logger"
+	"github.com/emancipat3r/orch/ui"
+	"github.com/emancipat3r/orch/utils"
 )
 
 func GetVultrAPIKey(configFile string, provider string) string {
@@ -251,7 +251,7 @@ func UploadVultrSSHKey(providerKey string, pubKeyPath string) (string, error) {
 		return "", err
 	}
 
-	keyName := "vps3-" + CreateUID()
+	keyName := "orch-" + CreateUID()
 	payload := VultrSSHKeyCreateRequest{
 		Name:   keyName,
 		SSHKey: string(data),
@@ -360,10 +360,10 @@ func CreateVultrInstance(providerKey, sshKeyID, privKeyPath string, osID int, re
 		Region:    region,
 		Plan:      plan,
 		OSID:      osID,
-		Label:     "vps3-" + UID,
+		Label:     "orch-" + UID,
 		SSHKeyIDs: []string{sshKeyID},
-		Tags:      []string{"vps3"},
-		Hostname:  "vps3-" + UID,
+		Tags:      []string{"orch"},
+		Hostname:  "orch-" + UID,
 	}
 
 	b, _ := json.Marshal(payload)
@@ -682,10 +682,10 @@ func DestroyVultr(providerKey string, instanceID string, instanceFile string) er
 			var wgConfigPath string
 			if instance.VPSName != "" {
 				// Use VPSName if available (new instances)
-				wgConfigPath = filepath.Join(homeDir, ".config", "vps", "wg", instance.VPSName+".conf")
+				wgConfigPath = filepath.Join(homeDir, ".config", "orch", "wg", instance.VPSName+".conf")
 			} else if instance.Ipv4 != "" && instance.Ipv4 != "pending" {
 				// Fallback to IP-based name for backward compatibility
-				wgConfigPath = filepath.Join(homeDir, ".config", "vps", "wg", "client-"+instance.Ipv4+".conf")
+				wgConfigPath = filepath.Join(homeDir, ".config", "orch", "wg", "client-"+instance.Ipv4+".conf")
 			}
 
 			if wgConfigPath != "" {

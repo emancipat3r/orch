@@ -11,10 +11,10 @@ import (
 	"syscall"
 
 	"github.com/charmbracelet/keygen"
-	"github.com/emancipat3r/vps3/logger"
-	"github.com/emancipat3r/vps3/providers"
-	"github.com/emancipat3r/vps3/ui"
-	"github.com/emancipat3r/vps3/utils"
+	"github.com/emancipat3r/orch/logger"
+	"github.com/emancipat3r/orch/providers"
+	"github.com/emancipat3r/orch/ui"
+	"github.com/emancipat3r/orch/utils"
 	"github.com/spf13/cobra"
 	"github.com/vishvananda/netlink"
 )
@@ -144,7 +144,7 @@ var createCmd = &cobra.Command{
 
 			// === Per-instance keypair (using charmbracelet/keygen) ===
 			keyName := "linode-" + providers.CreateUID()
-			perPriv := pathSSH + keyName // ~/.config/vps/.ssh/linode-XXXXXXXX
+			perPriv := pathSSH + keyName // ~/.config/orch/.ssh/linode-XXXXXXXX
 			perPub := perPriv + ".pub"
 
 			// optional: passphrase (store per key)
@@ -292,7 +292,7 @@ var createCmd = &cobra.Command{
 
 			// === Per-droplet keypair (using charmbracelet/keygen) ===
 			keyName := "do-" + providers.CreateUID()
-			perPriv := pathSSH + keyName // ~/.config/vps/.ssh/do-XXXXXXXX
+			perPriv := pathSSH + keyName // ~/.config/orch/.ssh/do-XXXXXXXX
 			perPub := perPriv + ".pub"
 
 			// optional: passphrase (store per key)
@@ -439,7 +439,7 @@ var createCmd = &cobra.Command{
 
 			// === Per-instance keypair (using charmbracelet/keygen) ===
 			keyName := "vultr-" + providers.CreateUID()
-			perPriv := pathSSH + keyName // ~/.config/vps/.ssh/vultr-XXXXXXXX
+			perPriv := pathSSH + keyName // ~/.config/orch/.ssh/vultr-XXXXXXXX
 			perPub := perPriv + ".pub"
 
 			// optional: passphrase (store per key)
@@ -513,7 +513,7 @@ func setupWireGuard(vpsName, netnsName string) error {
 		return logger.Errorf("failed to get home directory: %v", err)
 	}
 
-	confPath := filepath.Join(homeDir, ".config/vps/wg", vpsName+".conf")
+	confPath := filepath.Join(homeDir, ".config/orch/wg", vpsName+".conf")
 	if _, err := os.Stat(confPath); err != nil {
 		return logger.Errorf("WireGuard config not found at %s", confPath)
 	}

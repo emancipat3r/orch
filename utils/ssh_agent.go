@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/emancipat3r/vps3/logger"
+	"github.com/emancipat3r/orch/logger"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 )
@@ -85,7 +85,7 @@ func AddKeyToSSHAgent(privKeyPath string) error {
 
 func readPassphraseForKey(privKeyPath string) (string, error) {
 	keyName := filepath.Base(privKeyPath)              // e.g., do-13072376
-	cfgRoot := filepath.Dir(filepath.Dir(privKeyPath)) // .../.config/vps
+	cfgRoot := filepath.Dir(filepath.Dir(privKeyPath)) // .../.config/orch
 	passFile := filepath.Join(cfgRoot, "secrets", keyName+".pass")
 
 	b, err := os.ReadFile(passFile)

@@ -1,5 +1,5 @@
 ---
-- name: VPS Setup with WireGuard
+- name: Orch Setup with WireGuard
   hosts: all
   become: yes
   vars:

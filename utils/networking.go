@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/emancipat3r/vps3/logger"
+	"github.com/emancipat3r/orch/logger"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 	"golang.org/x/sys/unix"

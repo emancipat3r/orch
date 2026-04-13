@@ -12,8 +12,8 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/emancipat3r/vps3/logger"
-	"github.com/emancipat3r/vps3/ui"
+	"github.com/emancipat3r/orch/logger"
+	"github.com/emancipat3r/orch/ui"
 )
 
 var pathWg string
@@ -268,7 +268,7 @@ func RunAnsiblePlaybook(pathAnsibleInventory, playbookPath, privKeyPath string, 
 	}
 
 	// Check for verbose environment variable or parameter
-	if verbose || os.Getenv("ANSIBLE_VERBOSE") != "" || os.Getenv("VPS3_DEBUG") != "" {
+	if verbose || os.Getenv("ANSIBLE_VERBOSE") != "" || os.Getenv("ORCH_DEBUG") != "" {
 		args = append(args, "-v")
 		logger.Info("Running in verbose mode...")
 	}
@@ -327,7 +327,7 @@ func SetupPostProvisioningAnsible(ip, privKeyPath, vpsName string) error {
 		logger.Error("Failed to get current user: " + err.Error())
 		return err
 	}
-	pathConfig := user.HomeDir + "/.config/vps/"
+	pathConfig := user.HomeDir + "/.config/orch/"
 	pathAnsibleInventory := pathConfig + "ansible/inventory"
 	if err := GenerateInventory(config, pathAnsibleInventory); err != nil {
 		return fmt.Errorf("failed to generate inventory: %w", err)
@@ -335,7 +335,7 @@ func SetupPostProvisioningAnsible(ip, privKeyPath, vpsName string) error {
 
 	// Run the playbook (check for verbose mode)
 	playbookPath := filepath.Join("ansible", "playbook.yml")
-	verbose := os.Getenv("ANSIBLE_VERBOSE") != "" || os.Getenv("VPS3_DEBUG") != ""
+	verbose := os.Getenv("ANSIBLE_VERBOSE") != "" || os.Getenv("ORCH_DEBUG") != ""
 
 	if err := RunAnsiblePlaybook(pathAnsibleInventory, playbookPath, privKeyPath, verbose); err != nil {
 		return fmt.Errorf("failed to run playbook: %w", err)
@@ -360,7 +360,7 @@ func DownloadClientConfig(ip, privKeyPath, vpsName string) error {
 	}
 
 	// Create local directory for client configs
-	pathWg = currentUser.HomeDir + "/.config/vps/wg/"
+	pathWg = currentUser.HomeDir + "/.config/orch/wg/"
 
 	// Download client.conf
 	scpCmd := exec.Command("scp",

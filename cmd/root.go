@@ -5,8 +5,8 @@ import (
 	"os"
 	"os/user"
 
-	"github.com/emancipat3r/vps3/logger"
-	"github.com/emancipat3r/vps3/utils"
+	"github.com/emancipat3r/orch/logger"
+	"github.com/emancipat3r/orch/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -24,7 +24,7 @@ var (
 
 // rootCmd is the base command for the CLI
 var rootCmd = &cobra.Command{
-	Use:   "vps",
+	Use:   "orch",
 	Short: "VPS management CLI",
 	Long:  "A CLI tool for provisioning and managing VPS instances.",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -41,12 +41,12 @@ var rootCmd = &cobra.Command{
 			return nil
 		}
 
-		pathConfig = user.HomeDir + "/.config/vps/config/"
-		pathSSH = user.HomeDir + "/.config/vps/.ssh/"
-		pathSecrets = user.HomeDir + "/.config/vps/secrets/"
-		pathInstances = user.HomeDir + "/.config/vps/instances/"
-		pathAnsible = user.HomeDir + "/.config/vps/ansible/"
-		pathWg = user.HomeDir + "/.config/vps/wg/"
+		pathConfig = user.HomeDir + "/.config/orch/config/"
+		pathSSH = user.HomeDir + "/.config/orch/.ssh/"
+		pathSecrets = user.HomeDir + "/.config/orch/secrets/"
+		pathInstances = user.HomeDir + "/.config/orch/instances/"
+		pathAnsible = user.HomeDir + "/.config/orch/ansible/"
+		pathWg = user.HomeDir + "/.config/orch/wg/"
 		instanceFile = pathInstances + "instances.toml"
 		configFile = pathConfig + "configuration.toml"
 
