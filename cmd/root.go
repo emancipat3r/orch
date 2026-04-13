@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/user"
 
+	"github.com/emancipat3r/orch/embedded"
 	"github.com/emancipat3r/orch/logger"
 	"github.com/emancipat3r/orch/utils"
 	"github.com/spf13/cobra"
@@ -68,19 +69,19 @@ var rootCmd = &cobra.Command{
 		if !utils.FileExists(configFile) {
 			logger.Warn("Provider configuration file missing.")
 
-			// Try to copy template if it exists
-			templatePath := "templates/configuration.toml"
-			if utils.FileExists(templatePath) {
+			// Try to copy template from embedded assets
+			templateData, err := embedded.Assets.ReadFile("templates/configuration.toml")
+			if err == nil {
 				logger.Info("Copying configuration template to: " + logger.Highlight(configFile))
-				if err := utils.CopyFile(templatePath, configFile); err != nil {
-					return fmt.Errorf("failed to copy config template: %w", err)
+				if err := os.WriteFile(configFile, templateData, 0644); err != nil {
+					return fmt.Errorf("failed to write config template: %w", err)
 				}
 				logger.Info("Configuration template copied successfully!")
 				logger.Warn("Please edit " + logger.Highlight(configFile) + " and add your provider API keys")
 				return fmt.Errorf("configuration file created - please add your API keys and try again")
 			}
 
-			logger.Error("Configuration template not found at: " + templatePath)
+			logger.Error("Configuration template not found in embedded assets")
 			return fmt.Errorf("missing config file: %s", configFile)
 		}
 		logger.Info("Provider configuration file exists: " + logger.Highlight(configFile))

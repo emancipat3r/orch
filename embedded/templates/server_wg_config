@@ -1,0 +1,14 @@
+[Interface]
+PrivateKey = {{ wg_server_private_key.stdout }}
+Address = 172.16.10.1/30
+ListenPort = {{ wireguard_port }}
+SaveConfig = true
+MTU = 1420
+
+# Enable packet forwarding and NAT (works across all providers)
+PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT; iptables -t nat -A POSTROUTING -o {{ primary_interface.stdout }} -j MASQUERADE; iptables -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT; iptables -t nat -D POSTROUTING -o {{ primary_interface.stdout }} -j MASQUERADE; iptables -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+
+[Peer]
+PublicKey = {{ wg_client_public_key.stdout }}
+AllowedIPs = 172.16.10.0/30 

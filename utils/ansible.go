@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"os/user"
@@ -12,6 +13,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/emancipat3r/orch/embedded"
 	"github.com/emancipat3r/orch/logger"
 	"github.com/emancipat3r/orch/ui"
 )
@@ -81,9 +83,8 @@ func CheckAnsibleInstalled() error {
 
 // GenerateInventory creates an Ansible inventory file for the VPS
 func GenerateInventory(config AnsibleConfig, pathAnsibleInventory string) error {
-	// Read the inventory template
-	templatePath := filepath.Join("templates", "inventory")
-	templateContent, err := os.ReadFile(templatePath)
+	// Read the inventory template from embedded assets
+	templateContent, err := embedded.Assets.ReadFile("templates/inventory")
 	if err != nil {
 		return logger.Errorf("failed to read inventory template: %w", err)
 	}
@@ -333,8 +334,15 @@ func SetupPostProvisioningAnsible(ip, privKeyPath, vpsName string) error {
 		return fmt.Errorf("failed to generate inventory: %w", err)
 	}
 
+	// Extract embedded ansible/templates to a temp dir so ansible-playbook can find them
+	tmpDir, err := extractEmbeddedAssets()
+	if err != nil {
+		return fmt.Errorf("failed to extract embedded assets: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
 	// Run the playbook (check for verbose mode)
-	playbookPath := filepath.Join("ansible", "playbook.yml")
+	playbookPath := filepath.Join(tmpDir, "ansible", "playbook.yml")
 	verbose := os.Getenv("ANSIBLE_VERBOSE") != "" || os.Getenv("ORCH_DEBUG") != ""
 
 	if err := RunAnsiblePlaybook(pathAnsibleInventory, playbookPath, privKeyPath, verbose); err != nil {
@@ -376,4 +384,36 @@ func DownloadClientConfig(ip, privKeyPath, vpsName string) error {
 	}
 
 	return nil
+}
+
+// extractEmbeddedAssets writes the embedded ansible/ and templates/ dirs to a
+// temporary directory, preserving the relative structure the playbook expects
+// (ansible/playbook.yml references ../templates/*). Caller must os.RemoveAll
+// the returned path when done.
+func extractEmbeddedAssets() (string, error) {
+	tmpDir, err := os.MkdirTemp("", "orch-assets-*")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp dir: %w", err)
+	}
+
+	err = fs.WalkDir(embedded.Assets, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		dest := filepath.Join(tmpDir, path)
+		if d.IsDir() {
+			return os.MkdirAll(dest, 0755)
+		}
+		data, err := embedded.Assets.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(dest, data, 0644)
+	})
+	if err != nil {
+		os.RemoveAll(tmpDir)
+		return "", fmt.Errorf("failed to extract embedded assets: %w", err)
+	}
+
+	return tmpDir, nil
 }
