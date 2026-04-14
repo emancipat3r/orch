@@ -665,8 +665,16 @@ func DestroyVultr(providerKey string, instanceID string, instanceFile string) er
 			logger.Info("Deleted private key file: " + logger.Highlight(privKeyPath))
 		}
 
+		// Delete the pub key file if it exists
+		pubKeyFile := privKeyPath + ".pub"
+		if err := os.Remove(pubKeyFile); err != nil {
+			// Don't warn about this as it might not exist
+		} else {
+			logger.Info("Deleted public key file: " + logger.Highlight(pubKeyFile))
+		}
+
 		// Also try to delete the passphrase file
-		passPhraseFile := strings.Replace(privKeyPath, "/.ssh/", "/.secrets/", 1)
+		passPhraseFile := strings.Replace(privKeyPath, "/.ssh/", "/secrets/", 1)
 		passPhraseFile = strings.TrimSuffix(passPhraseFile, filepath.Ext(passPhraseFile)) + ".pass"
 		if err := os.Remove(passPhraseFile); err != nil {
 			// Don't warn about this as it might not exist
