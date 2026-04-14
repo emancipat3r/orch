@@ -676,8 +676,16 @@ func DestroyDroplet(providerKey, instanceID, instanceFile string) (string, error
 			logger.Info("Deleted private key file: " + logger.Highlight(instance.PrivKeyPath))
 		}
 
+		// Delete the pub key file if it exists
+		pubKeyFile := instance.PrivKeyPath + ".pub"
+		if err := os.Remove(pubKeyFile); err != nil {
+			// Don't warn about this as it might not exist
+		} else {
+			logger.Info("Deleted public key file: " + logger.Highlight(pubKeyFile))
+		}
+
 		// Also try to delete the passphrase file
-		passPhraseFile := strings.Replace(instance.PrivKeyPath, "/.ssh/", "/.secrets/", 1)
+		passPhraseFile := strings.Replace(instance.PrivKeyPath, "/.ssh/", "/secrets/", 1)
 		passPhraseFile = strings.TrimSuffix(passPhraseFile, filepath.Ext(passPhraseFile)) + ".pass"
 		if err := os.Remove(passPhraseFile); err != nil {
 			// Don't warn about this as it might not exist
