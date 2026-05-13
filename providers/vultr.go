@@ -350,7 +350,7 @@ type VultrInstanceRecord struct {
 
 type VultrInstancesToml map[string]VultrInstanceRecord
 
-func CreateVultrInstance(providerKey, sshKeyID, privKeyPath string, osID int, region, plan, instanceFile, vpsName string) (string, error) {
+func CreateVultrInstance(parent context.Context, providerKey, sshKeyID, privKeyPath string, osID int, region, plan, instanceFile, vpsName string) (string, error) {
 	if providerKey == "" {
 		return "", logger.Errorf("Provider key is empty")
 	}
@@ -394,8 +394,8 @@ func CreateVultrInstance(providerKey, sshKeyID, privKeyPath string, osID int, re
 
 	logger.Info("Instance created with ID: " + logger.Highlight(parsed.Instance.ID))
 
-	// Start the spinner
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	// Start the spinner. Parent context so a user cancel aborts polling.
+	ctx, cancel := context.WithTimeout(parent, 5*time.Minute)
 	defer cancel()
 
 	spinnerProg, doneChan := ui.IPWaitSpinner(ctx, "Waiting for IP address assignment...")
@@ -511,7 +511,7 @@ func CreateVultrInstance(providerKey, sshKeyID, privKeyPath string, osID int, re
 
 	// Run Ansible post-provisioning setup
 	if finalIP != "" && finalIP != "pending" {
-		if err := utils.SetupPostProvisioningAnsible(finalIP, privKeyPath, vpsName); err != nil {
+		if err := utils.SetupPostProvisioningAnsible(parent, finalIP, privKeyPath, vpsName); err != nil {
 			logger.Warn("Post-provisioning setup failed: " + err.Error())
 		}
 	}

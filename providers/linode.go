@@ -363,7 +363,7 @@ func DeleteLinodeSSHKey(providerKey string, keyID int) error {
 	return nil
 }
 
-func CreateLinode(providerKey string, sshKeyID int, privKeyPath, image, region, resource, rootPass, instanceFile, vpsName string) (string, error) {
+func CreateLinode(parent context.Context, providerKey string, sshKeyID int, privKeyPath, image, region, resource, rootPass, instanceFile, vpsName string) (string, error) {
 	if providerKey == "" {
 		return "", logger.Errorf("Provider key is empty")
 	}
@@ -422,8 +422,8 @@ func CreateLinode(providerKey string, sshKeyID int, privKeyPath, image, region, 
 
 	logger.Info("Instance created with ID: " + logger.Highlight(strconv.Itoa(parsedResponseBytes.Id)))
 
-	// Start the spinner
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	// Start the spinner. Parent context so a user cancel aborts polling.
+	ctx, cancel := context.WithTimeout(parent, 5*time.Minute)
 	defer cancel()
 
 	spinnerProg, doneChan := ui.IPWaitSpinner(ctx, "Waiting for IP address assignment...")
@@ -549,7 +549,7 @@ func CreateLinode(providerKey string, sshKeyID int, privKeyPath, image, region, 
 
 	// Run Ansible post-provisioning setup
 	if finalIP != "" && finalIP != "pending" {
-		if err := utils.SetupPostProvisioningAnsible(finalIP, privKeyPath, vpsName); err != nil {
+		if err := utils.SetupPostProvisioningAnsible(parent, finalIP, privKeyPath, vpsName); err != nil {
 			logger.Warn("Post-provisioning setup failed: " + err.Error())
 		}
 	}

@@ -22,10 +22,13 @@ func log(style lipgloss.Style, label, msg string) {
 	fmt.Printf("%s %s %s\n", ts, style.Render("["+label+"]"), msg)
 }
 
+// Errorf logs an error and returns it. Unlike fmt.Sprintf, fmt.Errorf
+// honors %w, so callers can chain wrapped errors and errors.Is/errors.As
+// works on the result.
 func Errorf(format string, args ...interface{}) error {
-	msg := fmt.Sprintf(format, args...)
-	log(errorStyle, "ERROR", msg)
-	return fmt.Errorf(msg)
+	err := fmt.Errorf(format, args...)
+	log(errorStyle, "ERROR", err.Error())
+	return err
 }
 
 func Highlight(text string) string {
