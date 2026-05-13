@@ -2,12 +2,10 @@ package cmd
 
 import (
 	"os"
-	"os/signal"
 	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/emancipat3r/orch/logger"
 	"github.com/emancipat3r/orch/providers"
@@ -21,32 +19,16 @@ var destroyCmd = &cobra.Command{
 	Use:   "destroy",
 	Short: "Destroy VPS instance(s)",
 	Run: func(cmd *cobra.Command, args []string) {
-		// Ctrl+C handling
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-		go func() {
-			<-sigChan
-			logger.Info("\nOperation cancelled by user (Ctrl+C)")
-			os.Exit(0)
-		}()
+		ctx := cmd.Context()
 
 		provider := ui.ChoiceProvider()
 		if provider == "" {
 			logger.Info("Operation cancelled by user.")
 			return
 		}
-
-		u, err := user.Current()
-		if err != nil {
-			logger.Error("Failed to get current user: " + err.Error())
+		if ctx.Err() != nil {
 			return
 		}
-
-		pathConfig = filepath.Join(u.HomeDir, ".config/orch/config/")
-		configFile = filepath.Join(pathConfig, "configuration.toml")
-		pathInstances = filepath.Join(u.HomeDir, ".config/orch/instances/")
-		instanceFile = filepath.Join(pathInstances, "instances.toml")
 
 		switch provider {
 		// ---------------- LINODE ----------------

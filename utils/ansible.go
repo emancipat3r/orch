@@ -108,10 +108,12 @@ func GenerateInventory(config AnsibleConfig, pathAnsibleInventory string) error 
 	return nil
 }
 
-// WaitForSSH waits for SSH to become available on the VPS
-func WaitForSSH(ip, privKeyPath string, maxWaitTime time.Duration) error {
+// WaitForSSH waits for SSH to become available on the VPS. The parent context
+// is combined with the maxWaitTime timeout, so either a user-cancellation or a
+// timeout aborts the wait.
+func WaitForSSH(parent context.Context, ip, privKeyPath string, maxWaitTime time.Duration) error {
 	// Start the spinner
-	ctx, cancel := context.WithTimeout(context.Background(), maxWaitTime)
+	ctx, cancel := context.WithTimeout(parent, maxWaitTime)
 	defer cancel()
 
 	spinnerProg, doneChan := ui.IPWaitSpinner(ctx, "Waiting for SSH port to become available...")
@@ -214,13 +216,14 @@ func WaitForSSH(ip, privKeyPath string, maxWaitTime time.Duration) error {
 	// Add small delay to ensure spinner is fully cleared
 	time.Sleep(100 * time.Millisecond)
 
-	// Check if we succeeded or timed out
-	select {
-	case <-ctx.Done():
+	// Check if we succeeded or were aborted (timeout vs. parent cancel).
+	if err := ctx.Err(); err != nil {
+		if parent.Err() != nil {
+			return fmt.Errorf("SSH wait cancelled: %w", parent.Err())
+		}
 		return fmt.Errorf("timeout waiting for SSH to become available after %v", maxWaitTime)
-	default:
-		return nil
 	}
+	return nil
 }
 
 // CheckOSCompatibility checks if the VPS is running Ubuntu or Debian
@@ -294,16 +297,23 @@ func RunAnsiblePlaybook(pathAnsibleInventory, playbookPath, privKeyPath string, 
 	return nil
 }
 
-// SetupPostProvisioningAnsible orchestrates the complete Ansible setup process
-func SetupPostProvisioningAnsible(ip, privKeyPath, vpsName string) error {
+// SetupPostProvisioningAnsible orchestrates the complete Ansible setup process.
+// ctx is honored during the SSH-wait phase; the playbook subprocess and HTTP
+// calls inside this function don't currently consume it, but a cancel will
+// still cause the function to return at the next checkpoint.
+func SetupPostProvisioningAnsible(ctx context.Context, ip, privKeyPath, vpsName string) error {
 
 	// Check if Ansible is installed
 	if err := CheckAnsibleInstalled(); err != nil {
 		return fmt.Errorf("ansible is not installed. To install: pip install ansible or apt install ansible")
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	// Wait for SSH to become available
-	if err := WaitForSSH(ip, privKeyPath, 5*time.Minute); err != nil {
+	if err := WaitForSSH(ctx, ip, privKeyPath, 5*time.Minute); err != nil {
 		return fmt.Errorf("SSH connection failed: %w", err)
 	}
 
@@ -323,13 +333,16 @@ func SetupPostProvisioningAnsible(ip, privKeyPath, vpsName string) error {
 		VPSName:     vpsName,
 	}
 
-	user, err := user.Current()
+	u, err := user.Current()
 	if err != nil {
 		logger.Error("Failed to get current user: " + err.Error())
 		return err
 	}
-	pathConfig := user.HomeDir + "/.config/orch/"
-	pathAnsibleInventory := pathConfig + "ansible/inventory"
+	pathAnsibleDir := filepath.Join(u.HomeDir, ".config", "orch", "ansible")
+	if err := os.MkdirAll(pathAnsibleDir, 0755); err != nil {
+		return fmt.Errorf("failed to ensure ansible dir: %w", err)
+	}
+	pathAnsibleInventory := filepath.Join(pathAnsibleDir, "inventory")
 	if err := GenerateInventory(config, pathAnsibleInventory); err != nil {
 		return fmt.Errorf("failed to generate inventory: %w", err)
 	}

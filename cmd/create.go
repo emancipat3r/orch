@@ -1,14 +1,11 @@
 package cmd
 
 import (
-	"io/ioutil"
 	"net"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/charmbracelet/keygen"
 	"github.com/emancipat3r/orch/logger"
@@ -23,20 +20,15 @@ var createCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Provision a new VPS instance",
 	Run: func(cmd *cobra.Command, args []string) {
-		// Set up signal handling for graceful shutdown
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-		go func() {
-			<-sigChan
-			logger.Info("\nOperation cancelled by user (Ctrl+C)")
-			os.Exit(0)
-		}()
+		ctx := cmd.Context()
 
 		// Use wizard interface for provider selection and navigation
 		provider := ui.ChoiceProvider()
 		if provider == "" {
 			logger.Info("Operation cancelled by user.")
+			return
+		}
+		if ctx.Err() != nil {
 			return
 		}
 
@@ -185,6 +177,7 @@ var createCmd = &cobra.Command{
 			// Create the instance with this key ID and persist priv key path
 			logger.Info("Creating Linode...")
 			_, err = providers.CreateLinode(
+				cmd.Context(),
 				providerKey,
 				keyID,
 				perPriv,
@@ -332,6 +325,7 @@ var createCmd = &cobra.Command{
 
 			// Create the droplet with this key ID and persist priv key path
 			_, err = providers.CreateDroplet(
+				cmd.Context(),
 				providerKey,
 				keyID,
 				perPriv,
@@ -378,8 +372,8 @@ var createCmd = &cobra.Command{
 				return
 			}
 			var osOptions []string
-			for _, os := range osImages {
-				osOptions = append(osOptions, strconv.Itoa(os.ID)+" - "+os.Name)
+			for _, img := range osImages {
+				osOptions = append(osOptions, strconv.Itoa(img.ID)+" - "+img.Name)
 			}
 
 			plans, err := providers.GetVultrPlans(providerKey)
@@ -393,7 +387,7 @@ var createCmd = &cobra.Command{
 			}
 
 			// Create navigable wizard with all options loaded
-			var region, os, plan string
+			var region, osChoice, plan string
 			steps := []ui.WizardStep{
 				{
 					Key:         "region",
@@ -407,7 +401,7 @@ var createCmd = &cobra.Command{
 					Title:       "Select your OS",
 					Description: "",
 					Options:     osOptions,
-					Value:       &os,
+					Value:       &osChoice,
 				},
 				{
 					Key:         "plan",
@@ -448,7 +442,7 @@ var createCmd = &cobra.Command{
 				logger.Error("Failed to gen passphrase: " + err.Error())
 				return
 			}
-			if err := ioutil.WriteFile(pathSecrets+keyName+".pass", []byte(pass+"\n"), 0600); err != nil {
+			if err := os.WriteFile(pathSecrets+keyName+".pass", []byte(pass+"\n"), 0600); err != nil {
 				logger.Error("Failed to store passphrase: " + err.Error())
 				return
 			}
@@ -479,6 +473,7 @@ var createCmd = &cobra.Command{
 
 			logger.Info("Creating Vultr instance...")
 			instanceID, err := providers.CreateVultrInstance(
+				cmd.Context(),
 				providerKey,
 				keyID,
 				perPriv,

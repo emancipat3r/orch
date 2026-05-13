@@ -135,7 +135,7 @@ This is useful if the initial setup failed or if you want to reconfigure an inst
 		}
 
 		// Run post-provisioning setup
-		if err := utils.SetupPostProvisioningAnsible(ip, privKeyPath, vpsName); err != nil {
+		if err := utils.SetupPostProvisioningAnsible(cmd.Context(), ip, privKeyPath, vpsName); err != nil {
 			logger.Error("Post-provisioning setup failed: " + err.Error())
 			return
 		} else {
