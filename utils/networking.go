@@ -20,6 +20,52 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
+// CheckWireGuardSupport verifies the local kernel can create WireGuard
+// interfaces before any VPS is provisioned. It creates a throwaway link and
+// immediately removes it, so a nil return means setupWireGuard will be able to
+// build the tunnel. Catches a missing/unloaded wireguard module (EOPNOTSUPP)
+// as well as insufficient privileges (EPERM) up front, before money is spent.
+func CheckWireGuardSupport() error {
+	const probe = "orch-wgprobe"
+
+	// Clean up any leftover probe from a previously aborted run.
+	if existing, err := netlink.LinkByName(probe); err == nil {
+		_ = netlink.LinkDel(existing)
+	}
+
+	la := netlink.NewLinkAttrs()
+	la.Name = probe
+	if err := netlink.LinkAdd(&netlink.Wireguard{LinkAttrs: la}); err != nil {
+		return logger.Errorf("kernel cannot create WireGuard interfaces: %v "+
+			"(ensure the 'wireguard' module is loaded: sudo modprobe wireguard)", err)
+	}
+
+	if link, err := netlink.LinkByName(probe); err == nil {
+		_ = netlink.LinkDel(link)
+	}
+	return nil
+}
+
+// CleanupWireGuard best-effort removes a partially-built tunnel: the WireGuard
+// link (if it's still in the host namespace) and the named netns along with its
+// per-netns resolv.conf. Safe to call at any point during setup — every step is
+// idempotent and ignores "already gone" errors. Used to roll back a setup that
+// failed partway through so it doesn't leak interfaces or namespaces.
+func CleanupWireGuard(linkName, netnsName string) {
+	// If the link never made it into the netns, it's still in the host ns and
+	// must be deleted directly. Once moved, deleting the netns drops it too.
+	if link, err := netlink.LinkByName(linkName); err == nil {
+		_ = netlink.LinkDel(link)
+	}
+
+	if netnsName != "" {
+		_ = TearDownNamespace(netnsName, netns.None())
+		nsDir := filepath.Join("/etc/netns", netnsName)
+		_ = os.Remove(filepath.Join(nsDir, "resolv.conf"))
+		_ = os.Remove(nsDir)
+	}
+}
+
 func CreateWgInt(interfaceName string) (string, error) {
 	la := netlink.NewLinkAttrs()
 	la.Name = interfaceName

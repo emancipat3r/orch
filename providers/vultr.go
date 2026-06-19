@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -18,15 +17,6 @@ import (
 	"github.com/emancipat3r/orch/ui"
 	"github.com/emancipat3r/orch/utils"
 )
-
-func GetVultrAPIKey(configFile string, provider string) string {
-	providerKey := utils.ParseCreds(configFile, provider)
-	if providerKey == "" {
-		logger.Error("Failed to parse provider credentials")
-		return ""
-	}
-	return providerKey
-}
 
 type VultrAccount struct {
 	Balance           float64 `json:"balance"`
@@ -725,99 +715,4 @@ func DestroyVultr(providerKey string, instanceID string, instanceFile string) er
 
 	logger.Info("Successfully destroyed Vultr instance: " + logger.Highlight(instanceID))
 	return nil
-}
-
-func ListVultrInstancesTable(providerKey string, instanceFile string) (string, error) {
-	if providerKey == "" {
-		return "", logger.Errorf("Provider key is empty")
-	}
-
-	instances, err := ListVultrInstances(providerKey)
-	if err != nil {
-		return "", err
-	}
-
-	// Cache regions for verbose display
-	regionCache := make(map[string]string)
-	regions, err := GetVultrRegions(providerKey)
-	if err == nil {
-		for _, region := range regions {
-			regionCache[region.ID] = region.ID + " - " + region.City + ", " + region.Country
-		}
-	}
-
-	//	if len(instances) == 0 {
-	//		logger.Info("No instances found")
-	//		return "", nil
-	//	}
-
-	// Load existing instances from TOML file to check/update IP addresses
-	var storedInstances VultrInstancesToml
-	var hasChanges bool
-
-	if _, err := os.Stat(instanceFile); err == nil {
-		if _, err := toml.DecodeFile(instanceFile, &storedInstances); err != nil {
-			logger.Warn("Failed to load instances file for IP sync: " + err.Error())
-			storedInstances = make(VultrInstancesToml)
-		}
-	} else {
-		storedInstances = make(VultrInstancesToml)
-	}
-
-	var rows [][]string
-	for _, instance := range instances {
-		// Check if we need to update the stored instance with current IP
-		if storedInstance, exists := storedInstances[instance.ID]; exists {
-			if storedInstance.Ipv4 != instance.MainIP && instance.MainIP != "" {
-				// Update the stored instance with new IP
-				storedInstance.Ipv4 = instance.MainIP
-				storedInstances[instance.ID] = storedInstance
-				hasChanges = true
-				logger.Info("Updated IP for Vultr instance " + logger.Highlight(instance.ID) + ": " + logger.Highlight(instance.MainIP))
-			}
-		}
-
-		// Get verbose region name
-		regionDisplay := instance.Region
-		if verboseRegion, exists := regionCache[instance.Region]; exists {
-			regionDisplay = verboseRegion
-		}
-
-		rows = append(rows, []string{
-			instance.ID,
-			instance.MainIP,
-			regionDisplay,
-			instance.OS,
-			instance.Plan,
-			instance.DateCreated,
-			instance.Status,
-		})
-	}
-
-	// Write back the instances file if we made changes
-	if hasChanges {
-		tmp := instanceFile + ".tmp"
-		f, err := os.Create(tmp)
-		if err != nil {
-			logger.Warn("Failed to create temp file for IP sync: " + err.Error())
-		} else {
-			if err := toml.NewEncoder(f).Encode(storedInstances); err != nil {
-				_ = f.Close()
-				_ = os.Remove(tmp)
-				logger.Warn("Failed to encode updated instances: " + err.Error())
-			} else if err := f.Close(); err != nil {
-				_ = os.Remove(tmp)
-				logger.Warn("Failed to close temp instances file: " + err.Error())
-			} else if err := os.Rename(tmp, instanceFile); err != nil {
-				_ = os.Remove(tmp)
-				logger.Warn("Failed to update instances file: " + err.Error())
-			} else {
-				logger.Info("Synced IP addresses to instances file")
-			}
-		}
-	}
-
-	fmt.Println(ui.InstanceTable(rows))
-
-	return "", nil
 }
