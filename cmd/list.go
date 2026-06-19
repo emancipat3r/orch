@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/emancipat3r/orch/logger"
 	"github.com/emancipat3r/orch/providers"
 	"github.com/emancipat3r/orch/ui"
@@ -11,62 +13,40 @@ var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List running VPS instances",
 	Run: func(cmd *cobra.Command, args []string) {
-		provider := ui.ChoiceProvider()
-		if provider == "" {
+		ctx := cmd.Context()
+
+		providerName := ui.ChoiceProvider()
+		if providerName == "" {
 			logger.Info("Operation cancelled by user.")
 			return
 		}
 
-		switch provider {
-		case "Linode":
-			providerKey := providers.GetLinodeAPIKey(configFile, provider)
-
-			accountBalance, err := providers.GetLinodesBalance(providerKey)
-
-			if err != nil {
-				logger.Error("Failed to get Linode account balance: " + err.Error())
-				return
-			}
-
-			logger.Info("Linode account balance: " + logger.Highlight("$"+accountBalance))
-
-			providers.ListLinodeInstancesTable(providerKey, instanceFile)
-
-		case "DigitalOcean":
-			providerKey := providers.GetDOAPIKey(configFile, provider)
-
-			accountBalance, err := providers.GetDOBalance(providerKey)
-
-			if err != nil {
-				logger.Error("Failed to get DigitalOcean account balance: " + err.Error())
-				return
-			}
-
-			logger.Info("DigitalOcean account balance: " + logger.Highlight("$"+accountBalance))
-
-			_, err = providers.ListDOInstancesTable(providerKey)
-			if err != nil {
-				logger.Error("Failed to list DigitalOcean instances: " + err.Error())
-			}
-		case "Vultr":
-			providerKey := providers.GetVultrAPIKey(configFile, provider)
-
-			accountBalance, err := providers.GetVultrBalance(providerKey)
-
-			if err != nil {
-				logger.Error("Failed to get Vultr account balance: " + err.Error())
-				return
-			}
-
-			logger.Info("Vultr account balance: " + logger.Highlight("$"+accountBalance))
-
-			_, err = providers.ListVultrInstancesTable(providerKey, instanceFile)
-			if err != nil {
-				logger.Error("Failed to list Vultr instances: " + err.Error())
-			}
-		default:
-			logger.Warn("No provider was selected. Exiting...")
+		prov, err := providers.GetProvider(providerName, configFile)
+		if err != nil {
+			logger.Error(err.Error())
+			return
 		}
+
+		balance, err := prov.Balance(ctx)
+		if err != nil {
+			logger.Error("Failed to get " + providerName + " account balance: " + err.Error())
+			return
+		}
+		logger.Info(providerName + " account balance: " + logger.Highlight("$"+balance))
+
+		instances, err := prov.List(ctx)
+		if err != nil {
+			logger.Error("Failed to list " + providerName + " instances: " + err.Error())
+			return
+		}
+
+		rows := make([][]string, 0, len(instances))
+		for _, inst := range instances {
+			rows = append(rows, []string{
+				inst.ID, inst.IP, inst.Region, inst.Image, inst.Type, inst.Created, inst.Status,
+			})
+		}
+		fmt.Println(ui.InstanceTable(rows))
 	},
 }
 

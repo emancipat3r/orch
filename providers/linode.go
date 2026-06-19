@@ -19,16 +19,6 @@ import (
 	"github.com/emancipat3r/orch/utils"
 )
 
-func GetLinodeAPIKey(configFile string, provider string) string {
-
-	providerKey := utils.ParseCreds(configFile, provider)
-	if providerKey == "" {
-		logger.Error("Failed to parse provider credentials")
-		return ""
-	}
-	return providerKey
-}
-
 type LinodeAccount struct {
 	Balance           float64 `json:"balance"`
 	BalanceUninvoiced float64 `json:"balance_uninvoiced"`
@@ -80,36 +70,6 @@ func GetLinodesBalance(providerKey string) (string, error) {
 
 	return fmt.Sprintf("%.2f", account.Balance), nil
 
-}
-
-func ListLinodes(providerKey string) (string, error) {
-	if providerKey == "" {
-		return "", logger.Errorf("Provider key is empty")
-	}
-
-	request, err := http.NewRequest("GET", "https://api.linode.com/v4/linode/instances?page=1&page_size=100", nil)
-	if err != nil {
-		return "", err
-	}
-	request.Header.Set("Accept", "application/json")
-
-	client := &http.Client{}
-	response, err := client.Do(request)
-	if err != nil {
-		return "", err
-	}
-	defer response.Body.Close()
-
-	responseBytes, err := io.ReadAll(response.Body)
-	if err != nil {
-		return "", err
-	}
-
-	if response.StatusCode != http.StatusOK {
-		return "", logger.Errorf("Unexpected status code: %s | %s", strconv.Itoa(response.StatusCode), string(responseBytes))
-	}
-
-	return string(responseBytes), nil
 }
 
 type LinodeRegion struct {
@@ -554,148 +514,7 @@ func CreateLinode(parent context.Context, providerKey string, sshKeyID int, priv
 		}
 	}
 
-	return "", nil
-}
-
-type instanceJSONBytes struct {
-	Creation_Time string   `json:"created"`
-	Id            int      `json:"id"`
-	Host_Image    string   `json:"image"`
-	Ipv4          []string `json:"ipv4"`
-	Ipv6          string   `json:"ipv6"`
-	Region        string   `json:"region"`
-	Type          string   `json:"type"`
-	Status        string   `json:"status"`
-}
-
-type linodeListResponse struct {
-	Data    []instanceJSONBytes `json:"data"`
-	Page    int                 `json:"page"`
-	Pages   int                 `json:"pages"`
-	Results int                 `json:"results"`
-}
-
-func ListLinodeInstancesTable(providerKey string, instanceFile string) (string, error) {
-	if providerKey == "" {
-		return "", logger.Errorf("Provider key is empty")
-	}
-
-	req, err := http.NewRequest("GET", "https://api.linode.com/v4/linode/instances?page_size=500", nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", "Bearer "+providerKey)
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	responseBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	var parsedResponseBytes linodeListResponse
-	err = json.Unmarshal(responseBytes, &parsedResponseBytes)
-	if err != nil {
-		return "", err
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		fmt.Print(bodyBytes)
-		return "", logger.Errorf("Unexpected status code: %d | %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	// Cache regions for verbose display
-	regionCache := make(map[string]string)
-	regions, err := GetLinodeRegions()
-	if err == nil {
-		for _, region := range regions {
-			regionCache[region.ID] = region.ID + " - " + region.Label
-		}
-	}
-
-	// Load existing instances from TOML file to check/update IP addresses
-	var storedInstances LinodeInstancesToml
-	var hasChanges bool
-
-	if _, err := os.Stat(instanceFile); err == nil {
-		if _, err := toml.DecodeFile(instanceFile, &storedInstances); err != nil {
-			logger.Warn("Failed to load instances file for IP sync: " + err.Error())
-			storedInstances = make(LinodeInstancesToml)
-		}
-	} else {
-		storedInstances = make(LinodeInstancesToml)
-	}
-
-	var rows [][]string
-	for _, inst := range parsedResponseBytes.Data {
-		ipv4 := ""
-		if len(inst.Ipv4) > 0 {
-			ipv4 = inst.Ipv4[0]
-		}
-
-		// Check if we need to update the stored instance with current IP
-		instanceIDStr := strconv.Itoa(inst.Id)
-		if storedInstance, exists := storedInstances[instanceIDStr]; exists {
-			if storedInstance.Ipv4 != ipv4 && ipv4 != "" {
-				// Update the stored instance with new IP
-				storedInstance.Ipv4 = ipv4
-				storedInstances[instanceIDStr] = storedInstance
-				hasChanges = true
-				logger.Info("Updated IP for Linode instance " + logger.Highlight(instanceIDStr) + ": " + logger.Highlight(ipv4))
-			}
-		}
-
-		// Get verbose region name
-		regionDisplay := inst.Region
-		if verboseRegion, exists := regionCache[inst.Region]; exists {
-			regionDisplay = verboseRegion
-		}
-
-		rows = append(rows, []string{
-			strconv.Itoa(inst.Id),
-			ipv4,
-			regionDisplay,
-			inst.Host_Image,
-			inst.Type,
-			inst.Creation_Time,
-			inst.Status,
-		})
-	}
-
-	// Write back the instances file if we made changes
-	if hasChanges {
-		tmp := instanceFile + ".tmp"
-		f, err := os.Create(tmp)
-		if err != nil {
-			logger.Warn("Failed to create temp file for IP sync: " + err.Error())
-		} else {
-			if err := toml.NewEncoder(f).Encode(storedInstances); err != nil {
-				_ = f.Close()
-				_ = os.Remove(tmp)
-				logger.Warn("Failed to encode updated instances: " + err.Error())
-			} else if err := f.Close(); err != nil {
-				_ = os.Remove(tmp)
-				logger.Warn("Failed to close temp instances file: " + err.Error())
-			} else if err := os.Rename(tmp, instanceFile); err != nil {
-				_ = os.Remove(tmp)
-				logger.Warn("Failed to update instances file: " + err.Error())
-			} else {
-				logger.Info("Synced IP addresses to instances file")
-			}
-		}
-	}
-
-	fmt.Println(ui.InstanceTable(rows))
-
-	return "", nil
-
+	return strconv.Itoa(parsedResponseBytes.Id), nil
 }
 
 type LinodeInstances struct {
@@ -705,6 +524,8 @@ type LinodeInstances struct {
 	Ipv4          []string `json:"ipv4"`
 	Ipv6          string   `json:"ipv6"`
 	Region        string   `json:"region"`
+	Type          string   `json:"type"`
+	Status        string   `json:"status"`
 }
 
 type LinodeInstancesResponse struct {
@@ -744,50 +565,6 @@ func SelectLinodeInstance(providerKey string) ([]LinodeInstances, error) {
 
 	return instancesResp.Data, nil
 
-}
-
-// Delete by table name (your table header equals the instance ID string)
-func DeleteByTableName(instanceFile string, instanceID ...string) error {
-	// Load instanceFile
-	var m LinodeInstancesToml
-
-	if _, err := os.Stat(instanceFile); err != nil {
-		return logger.Errorf("Cannot load instances file, not found: %s", instanceFile)
-	}
-
-	if _, err := toml.DecodeFile(instanceFile, &m); err != nil {
-		return logger.Errorf("decode toml: %v", err)
-	}
-
-	if m == nil {
-		return nil
-	}
-
-	// Delete tables associated with instanceIDs
-	for _, ID := range instanceID {
-		delete(m, ID)
-	}
-
-	// Write atomically (tmp + rename)
-	tmp := instanceFile + ".tmp"
-	f, err := os.Create(tmp)
-
-	if err != nil {
-		return logger.Errorf("Failed creating tmp instance file: %v", err)
-	}
-
-	if err := toml.NewEncoder(f).Encode(m); err != nil {
-		_ = f.Close()
-		_ = os.Remove(tmp)
-		return logger.Errorf("Failed updating instance file: %v", err)
-	}
-
-	if err := f.Close(); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("Failed to close tmp instance file: %w", err)
-	}
-
-	return os.Rename(tmp, instanceFile)
 }
 
 func DestroyLinode(providerKey, instanceID, instanceFile string) (string, error) {

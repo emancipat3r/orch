@@ -4,7 +4,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/keygen"
@@ -22,487 +21,184 @@ var createCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
 
-		// Use wizard interface for provider selection and navigation
-		provider := ui.ChoiceProvider()
-		if provider == "" {
+		// Preflight: confirm the local kernel can build the WireGuard tunnel
+		// before spending money provisioning a remote VPS.
+		if err := utils.CheckWireGuardSupport(); err != nil {
+			logger.Error("WireGuard preflight check failed: " + err.Error())
+			return
+		}
+
+		providerName := ui.ChoiceProvider()
+		if providerName == "" {
 			logger.Info("Operation cancelled by user.")
 			return
 		}
 		if ctx.Err() != nil {
 			return
 		}
+		logger.Info("You selected: " + logger.Highlight(providerName))
 
-		logger.Info("You selected: " + logger.Highlight(provider))
+		prov, err := providers.GetProvider(providerName, configFile)
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
 
-		// Load data for the selected provider and create navigable wizard
-		switch provider {
-		case "Linode":
-			providerKey := providers.GetLinodeAPIKey(configFile, provider)
-			accountBalance, err := providers.GetLinodesBalance(providerKey)
+		balance, err := prov.Balance(ctx)
+		if err != nil {
+			logger.Error("Failed to get " + providerName + " account balance: " + err.Error())
+			return
+		}
+		logger.Info(providerName + " account balance: " + logger.Highlight("$"+balance))
 
-			if err != nil {
-				logger.Error("Failed to get Linode account balance: " + err.Error())
-				return
+		// Load all selectable options up front so the wizard is fully navigable.
+		regions, err := prov.Regions(ctx)
+		if err != nil {
+			logger.Error("Failed to load regions: " + err.Error())
+			return
+		}
+		images, err := prov.Images(ctx)
+		if err != nil {
+			logger.Error("Failed to load images: " + err.Error())
+			return
+		}
+		sizes, err := prov.Sizes(ctx)
+		if err != nil {
+			logger.Error("Failed to load sizes: " + err.Error())
+			return
+		}
+
+		regionLabels, regionValue := optionLabels(regions)
+		imageLabels, imageValue := optionLabels(images)
+		sizeLabels, sizeValue := optionLabels(sizes)
+
+		var region, image, size string
+		steps := []ui.WizardStep{
+			{Key: "region", Title: "Select your region", Options: regionLabels, Value: &region},
+			{Key: "image", Title: "Select your image", Options: imageLabels, Value: &image},
+			{Key: "size", Title: "Select your resourcing", Options: sizeLabels, Value: &size},
+		}
+
+		selections, err := ui.CreateNavigableWizard(steps)
+		if err != nil {
+			logger.Info("Operation cancelled by user.")
+			return
+		}
+
+		selectedRegion := selections["region"]
+		selectedImage := selections["image"]
+		selectedSize := selections["size"]
+
+		logger.Info("You selected region: " + logger.Highlight(selectedRegion))
+		logger.Info("You selected image: " + logger.Highlight(selectedImage))
+		logger.Info("You selected type: " + logger.Highlight(selectedSize))
+
+		// === Per-instance keypair (using charmbracelet/keygen) ===
+		prefix := providerPrefix(providerName)
+		keyName := prefix + "-" + providers.CreateUID()
+		perPriv := pathSSH + keyName // ~/.config/orch/.ssh/<provider>-XXXXXXXX
+		perPub := perPriv + ".pub"
+
+		pass, err := utils.GenerateRandomPassword(24)
+		if err != nil {
+			logger.Error("Failed to gen passphrase: " + err.Error())
+			return
+		}
+		if err := os.WriteFile(pathSecrets+keyName+".pass", []byte(pass+"\n"), 0600); err != nil {
+			logger.Error("Failed to store passphrase: " + err.Error())
+			return
+		}
+
+		if _, err := keygen.New(perPriv, keygen.WithKeyType(keygen.Ed25519), keygen.WithPassphrase(pass), keygen.WithWrite()); err != nil {
+			logger.Error("Failed to create per-instance keypair: " + err.Error())
+			return
+		}
+
+		if err := utils.AddKeyToSSHAgent(perPriv); err != nil {
+			logger.Debug("Could not add key to ssh-agent: " + err.Error())
+		}
+
+		sshKeyID, err := prov.UploadSSHKey(ctx, perPub)
+		if err != nil {
+			logger.Error("Failed to upload SSH key: " + err.Error())
+			return
+		}
+		logger.Info("Per-instance SSH key ID: " + logger.Highlight(sshKeyID))
+
+		if vpsName == "" {
+			vpsName = prefix + "-" + providers.CreateUID()
+		}
+
+		logger.Info("Creating " + providerName + " instance...")
+		inst, err := prov.Create(ctx, providers.CreateSpec{
+			Image:        imageValue[selectedImage],
+			Region:       regionValue[selectedRegion],
+			Size:         sizeValue[selectedSize],
+			SSHKeyID:     sshKeyID,
+			PrivKeyPath:  perPriv,
+			VPSName:      vpsName,
+			InstanceFile: instanceFile,
+		})
+		if err != nil {
+			logger.Error("Failed to create " + providerName + " instance: " + err.Error())
+			// No instance came up, so the local keypair/passphrase we generated
+			// for it are orphans — clean them up rather than leaving artifacts.
+			if rmErr := utils.RemoveKeyFromSSHAgent(perPriv); rmErr != nil {
+				logger.Debug("Could not remove key from ssh-agent: " + rmErr.Error())
 			}
+			_ = os.Remove(perPriv)
+			_ = os.Remove(perPub)
+			_ = os.Remove(pathSecrets + keyName + ".pass")
+			return
+		}
 
-			logger.Info("Linode account balance: " + logger.Highlight("$"+accountBalance))
-
-			regions, err := providers.GetLinodeRegions()
-
-			if err != nil {
-				logger.Error("Failed to hit endpoint: " + err.Error())
-				return
-			}
-
-			var regionOptions []string
-
-			// Load all options for Linode
-			for _, region := range regions {
-				if region.Status == "ok" {
-					regionOptions = append(regionOptions, region.ID+" - "+region.Label)
+		if err := setupWireGuard(vpsName, vpsName); err != nil {
+			logger.Error("WireGuard setup failed: " + err.Error())
+			// The remote VPS is provisioned and billing but has no working
+			// tunnel. Offer to tear it down so a failed setup doesn't silently
+			// cost money.
+			if inst.ID != "" && ui.Confirm("WireGuard setup failed. Destroy the just-created "+providerName+" instance "+inst.ID+" to avoid charges?") {
+				if derr := prov.Destroy(ctx, inst.ID, instanceFile); derr != nil {
+					logger.Error("Teardown failed: " + derr.Error())
+				} else {
+					logger.Info("Destroyed instance " + logger.Highlight(inst.ID))
 				}
 			}
-
-			images, err := providers.GetLinodeImages()
-			if err != nil {
-				logger.Error("Failed to get Linode images: " + err.Error())
-				return
-			}
-			var imageOptions []string
-			for _, image := range images {
-				imageOptions = append(imageOptions, image.ID+" - "+image.Label)
-			}
-
-			resources, err := providers.GetLinodeResources()
-			if err != nil {
-				logger.Error("Failed to get Linode resources: " + err.Error())
-				return
-			}
-			var resourceOptions []string
-			for _, resource := range resources {
-				resourceOptions = append(resourceOptions, resource.ID+" - "+resource.Label)
-			}
-
-			// Create navigable wizard with all options loaded
-			var region, image, size string
-			steps := []ui.WizardStep{
-				{
-					Key:         "region",
-					Title:       "Select your region",
-					Description: "",
-					Options:     regionOptions,
-					Value:       &region,
-				},
-				{
-					Key:         "image",
-					Title:       "Select your image",
-					Description: "",
-					Options:     imageOptions,
-					Value:       &image,
-				},
-				{
-					Key:         "size",
-					Title:       "Select your resourcing",
-					Description: "",
-					Options:     resourceOptions,
-					Value:       &size,
-				},
-			}
-
-			selections, err := ui.CreateNavigableWizard(steps)
-			if err != nil {
-				logger.Info("Operation cancelled by user.")
-				return
-			}
-
-			selectedRegion := selections["region"]
-			selectedImage := selections["image"]
-			selectedResource := selections["size"]
-
-			logger.Info("You selected region: " + logger.Highlight(selectedRegion))
-			logger.Info("You selected image: " + logger.Highlight(selectedImage))
-			logger.Info("You selected type: " + logger.Highlight(selectedResource))
-
-			selectedRegionSplit := strings.Split(selectedRegion, " ")
-			selectedImageSplit := strings.Split(selectedImage, " ")
-			selectedResourceSplit := strings.Split(selectedResource, " ")
-
-			rootPassword, err := utils.GenerateRandomPassword(30)
-
-			if err != nil {
-				logger.Error("Failed to generate root password for Linode: " + err.Error())
-				return
-			}
-
-			// === Per-instance keypair (using charmbracelet/keygen) ===
-			keyName := "linode-" + providers.CreateUID()
-			perPriv := pathSSH + keyName // ~/.config/orch/.ssh/linode-XXXXXXXX
-			perPub := perPriv + ".pub"
-
-			// optional: passphrase (store per key)
-			pass, err := utils.GenerateRandomPassword(24)
-			if err != nil {
-				logger.Error("Failed to gen passphrase: " + err.Error())
-				return
-			}
-			if err := os.WriteFile(pathSecrets+keyName+".pass", []byte(pass+"\n"), 0600); err != nil {
-				logger.Error("Failed to store passphrase: " + err.Error())
-				return
-			}
-
-			// create the keypair
-			if _, err := keygen.New(perPriv, keygen.WithKeyType(keygen.Ed25519), keygen.WithPassphrase(pass), keygen.WithWrite()); err != nil {
-				logger.Error("Failed to create per-instance keypair: " + err.Error())
-				return
-			}
-
-			// Add key to ssh-agent if available
-			if err := utils.AddKeyToSSHAgent(perPriv); err != nil {
-				logger.Debug("Could not add key to ssh-agent: " + err.Error())
-			}
-
-			// Upload pubkey to Linode → get unique key ID
-			keyID, err := providers.UploadLinodeSSHKey(providerKey, perPub)
-			if err != nil {
-				logger.Error("Failed to upload SSH key to Linode: " + err.Error())
-				return
-			}
-			logger.Info("Per-instance SSH key ID: " + logger.Highlight(strconv.Itoa(keyID)))
-
-			// Generate default vpsName if not provided
-			if vpsName == "" {
-				vpsName = "linode-" + providers.CreateUID()
-			}
-
-			// Create the instance with this key ID and persist priv key path
-			logger.Info("Creating Linode...")
-			_, err = providers.CreateLinode(
-				cmd.Context(),
-				providerKey,
-				keyID,
-				perPriv,
-				selectedImageSplit[0],
-				selectedRegionSplit[0],
-				selectedResourceSplit[0],
-				rootPassword,
-				instanceFile,
-				vpsName,
-			)
-
-			if err != nil {
-				logger.Error("Failed to create Linode: " + err.Error())
-			}
-
-			if err := setupWireGuard(vpsName, vpsName); err != nil {
-				logger.Error("WireGuard setup failed: " + err.Error())
-			} else {
-				logger.Info("WireGuard network namespace setup complete.")
-			}
-
-		case "DigitalOcean":
-			providerKey := providers.GetDOAPIKey(configFile, provider)
-			accountBalance, err := providers.GetDOBalance(providerKey)
-			if err != nil {
-				logger.Error("Failed to get DigitalOcean account balance: " + err.Error())
-				return
-			}
-			logger.Info("DigitalOcean account balance: " + logger.Highlight("$"+accountBalance))
-
-			// region
-			regions, err := providers.GetDORegions(providerKey)
-			if err != nil {
-				logger.Error("Failed to hit endpoint: " + err.Error())
-				return
-			}
-			var regionOptions []string
-			for _, r := range regions {
-				regionOptions = append(regionOptions, r.Slug+" - "+r.Name)
-			}
-			// Load all options for DigitalOcean
-			images, err := providers.GetDOImages(providerKey)
-			if err != nil {
-				logger.Error("Failed to get DigitalOcean images: " + err.Error())
-				return
-			}
-			var imageOptions []string
-			for _, img := range images {
-				imageOptions = append(imageOptions, img.Slug+" - "+img.Name)
-			}
-
-			sizes, err := providers.GetDOResources(providerKey)
-			if err != nil {
-				logger.Error("Failed to get DigitalOcean sizes: " + err.Error())
-				return
-			}
-			var resourceOptions []string
-			for _, s := range sizes {
-				resourceOptions = append(resourceOptions, s.Slug+" - "+s.Name)
-			}
-
-			// Create navigable wizard with all options loaded
-			var region, image, size string
-			steps := []ui.WizardStep{
-				{
-					Key:         "region",
-					Title:       "Select your region",
-					Description: "",
-					Options:     regionOptions,
-					Value:       &region,
-				},
-				{
-					Key:         "image",
-					Title:       "Select your image",
-					Description: "",
-					Options:     imageOptions,
-					Value:       &image,
-				},
-				{
-					Key:         "size",
-					Title:       "Select your resourcing",
-					Description: "",
-					Options:     resourceOptions,
-					Value:       &size,
-				},
-			}
-
-			selections, err := ui.CreateNavigableWizard(steps)
-			if err != nil {
-				logger.Info("Operation cancelled by user.")
-				return
-			}
-
-			selectedRegion := selections["region"]
-			selectedImage := selections["image"]
-			selectedResource := selections["size"]
-
-			logger.Info("You selected region: " + logger.Highlight(selectedRegion))
-			logger.Info("You selected image: " + logger.Highlight(selectedImage))
-			logger.Info("You selected type: " + logger.Highlight(selectedResource))
-
-			selectedRegionSlug := strings.Split(selectedRegion, " ")[0]
-			selectedImageSlug := strings.Split(selectedImage, " ")[0]
-			selectedSizeSlug := strings.Split(selectedResource, " ")[0]
-
-			// === Per-droplet keypair (using charmbracelet/keygen) ===
-			keyName := "do-" + providers.CreateUID()
-			perPriv := pathSSH + keyName // ~/.config/orch/.ssh/do-XXXXXXXX
-			perPub := perPriv + ".pub"
-
-			// optional: passphrase (store per key)
-			pass, err := utils.GenerateRandomPassword(24)
-			if err != nil {
-				logger.Error("Failed to gen passphrase: " + err.Error())
-				return
-			}
-			if err := os.WriteFile(pathSecrets+keyName+".pass", []byte(pass+"\n"), 0600); err != nil {
-				logger.Error("Failed to store passphrase: " + err.Error())
-				return
-			}
-
-			// create the keypair
-			if _, err := keygen.New(perPriv, keygen.WithKeyType(keygen.Ed25519), keygen.WithPassphrase(pass), keygen.WithWrite()); err != nil {
-				logger.Error("Failed to create per-droplet keypair: " + err.Error())
-				return
-			}
-
-			// Add key to ssh-agent if available
-			if err := utils.AddKeyToSSHAgent(perPriv); err != nil {
-				logger.Debug("Could not add key to ssh-agent: " + err.Error())
-			}
-
-			// Upload pubkey to DigitalOcean → get unique key ID
-			keyID, err := providers.UploadDOSSHKey(providerKey, perPub)
-			if err != nil {
-				logger.Error("Failed to upload SSH key to DigitalOcean: " + err.Error())
-				return
-			}
-			logger.Info("Droplet SSH key ID: " + logger.Highlight(perPriv))
-
-			// Generate default vpsName if not provided
-			if vpsName == "" {
-				vpsName = "digitalocean-" + providers.CreateUID()
-			}
-
-			// Create the droplet with this key ID and persist priv key path
-			_, err = providers.CreateDroplet(
-				cmd.Context(),
-				providerKey,
-				keyID,
-				perPriv,
-				selectedImageSlug,
-				selectedRegionSlug,
-				selectedSizeSlug,
-				instanceFile,
-				vpsName,
-			)
-
-			if err != nil {
-				logger.Error("Failed to create Droplet: " + err.Error())
-			}
-
-			if err := setupWireGuard(vpsName, vpsName); err != nil {
-				logger.Error("WireGuard setup failed: " + err.Error())
-			} else {
-				logger.Info("WireGuard network namespace setup complete.")
-			}
-
-		case "Vultr":
-			providerKey := providers.GetVultrAPIKey(configFile, provider)
-			accountBalance, err := providers.GetVultrBalance(providerKey)
-			if err != nil {
-				logger.Error("Failed to get Vultr account balance: " + err.Error())
-				return
-			}
-			logger.Info("Vultr account balance: " + logger.Highlight("$"+accountBalance))
-
-			// region
-			regions, err := providers.GetVultrRegions(providerKey)
-			if err != nil {
-				logger.Error("Failed to hit endpoint: " + err.Error())
-				return
-			}
-			var regionOptions []string
-			for _, r := range regions {
-				regionOptions = append(regionOptions, r.ID+" - "+r.City+", "+r.Country)
-			}
-			// Load all options for Vultr
-			osImages, err := providers.GetVultrOS(providerKey)
-			if err != nil {
-				logger.Error("Failed to get Vultr OS images: " + err.Error())
-				return
-			}
-			var osOptions []string
-			for _, img := range osImages {
-				osOptions = append(osOptions, strconv.Itoa(img.ID)+" - "+img.Name)
-			}
-
-			plans, err := providers.GetVultrPlans(providerKey)
-			if err != nil {
-				logger.Error("Failed to get Vultr plans: " + err.Error())
-				return
-			}
-			var planOptions []string
-			for _, p := range plans {
-				planOptions = append(planOptions, p.ID+" - "+strconv.Itoa(p.VCPUCount)+" vCPU, "+strconv.Itoa(p.RAM)+" MB RAM, "+strconv.Itoa(p.Disk)+" GB SSD - $"+strconv.FormatFloat(p.MonthlyCost, 'f', 2, 64)+"/month")
-			}
-
-			// Create navigable wizard with all options loaded
-			var region, osChoice, plan string
-			steps := []ui.WizardStep{
-				{
-					Key:         "region",
-					Title:       "Select your region",
-					Description: "",
-					Options:     regionOptions,
-					Value:       &region,
-				},
-				{
-					Key:         "os",
-					Title:       "Select your OS",
-					Description: "",
-					Options:     osOptions,
-					Value:       &osChoice,
-				},
-				{
-					Key:         "plan",
-					Title:       "Select your plan",
-					Description: "",
-					Options:     planOptions,
-					Value:       &plan,
-				},
-			}
-
-			selections, err := ui.CreateNavigableWizard(steps)
-			if err != nil {
-				logger.Info("Operation cancelled by user.")
-				return
-			}
-
-			selectedRegion := selections["region"]
-			selectedOS := selections["os"]
-			selectedPlan := selections["plan"]
-
-			logger.Info("You selected region: " + logger.Highlight(selectedRegion))
-			logger.Info("You selected OS: " + logger.Highlight(selectedOS))
-			logger.Info("You selected plan: " + logger.Highlight(selectedPlan))
-
-			selectedRegionID := strings.Split(selectedRegion, " ")[0]
-			selectedOSIDStr := strings.Split(selectedOS, " ")[0]
-			selectedOSID, _ := strconv.Atoi(selectedOSIDStr)
-			selectedPlanID := strings.Split(selectedPlan, " ")[0]
-
-			// === Per-instance keypair (using charmbracelet/keygen) ===
-			keyName := "vultr-" + providers.CreateUID()
-			perPriv := pathSSH + keyName // ~/.config/orch/.ssh/vultr-XXXXXXXX
-			perPub := perPriv + ".pub"
-
-			// optional: passphrase (store per key)
-			pass, err := utils.GenerateRandomPassword(24)
-			if err != nil {
-				logger.Error("Failed to gen passphrase: " + err.Error())
-				return
-			}
-			if err := os.WriteFile(pathSecrets+keyName+".pass", []byte(pass+"\n"), 0600); err != nil {
-				logger.Error("Failed to store passphrase: " + err.Error())
-				return
-			}
-
-			// create the keypair
-			if _, err := keygen.New(perPriv, keygen.WithKeyType(keygen.Ed25519), keygen.WithPassphrase(pass), keygen.WithWrite()); err != nil {
-				logger.Error("Failed to create per-instance keypair: " + err.Error())
-				return
-			}
-
-			// Add key to ssh-agent if available
-			if err := utils.AddKeyToSSHAgent(perPriv); err != nil {
-				logger.Debug("Could not add key to ssh-agent: " + err.Error())
-			}
-
-			// Upload pubkey to Vultr → get unique key ID
-			keyID, err := providers.UploadVultrSSHKey(providerKey, perPub)
-			if err != nil {
-				logger.Error("Failed to upload SSH key to Vultr: " + err.Error())
-				return
-			}
-			logger.Info("Per-instance SSH key ID: " + logger.Highlight(keyID))
-
-			// Generate default vpsName if not provided
-			if vpsName == "" {
-				vpsName = "vultr-" + providers.CreateUID()
-			}
-
-			logger.Info("Creating Vultr instance...")
-			instanceID, err := providers.CreateVultrInstance(
-				cmd.Context(),
-				providerKey,
-				keyID,
-				perPriv,
-				selectedOSID,
-				selectedRegionID,
-				selectedPlanID,
-				instanceFile,
-				vpsName,
-			)
-
-			if err != nil {
-				logger.Error("Failed to create Vultr instance: " + err.Error())
-			} else {
-				logger.Info("Successfully created Vultr instance: " + logger.Highlight(instanceID))
-			}
-
-			if err := setupWireGuard(vpsName, vpsName); err != nil {
-				logger.Error("WireGuard setup failed: " + err.Error())
-			} else {
-				logger.Info("WireGuard network namespace setup complete.")
-			}
-
-		default:
-			logger.Warn("No provider was selected. Exiting...")
+			return
 		}
+		logger.Info("WireGuard network namespace setup complete.")
 	},
 }
 
-func setupWireGuard(vpsName, netnsName string) error {
+// optionLabels splits provider Options into the label slice the wizard renders
+// and a label->value lookup so the selected display string maps back to the
+// underlying id/slug without positional string parsing.
+func optionLabels(opts []providers.Option) ([]string, map[string]string) {
+	labels := make([]string, len(opts))
+	lookup := make(map[string]string, len(opts))
+	for i, o := range opts {
+		labels[i] = o.Label
+		lookup[o.Label] = o.Value
+	}
+	return labels, lookup
+}
+
+// providerPrefix is the short, filesystem-friendly key prefix for a provider's
+// per-instance SSH keys and default VPS names.
+func providerPrefix(name string) string {
+	switch name {
+	case "DigitalOcean":
+		return "do"
+	case "Linode":
+		return "linode"
+	case "Vultr":
+		return "vultr"
+	default:
+		return strings.ToLower(name)
+	}
+}
+
+func setupWireGuard(vpsName, netnsName string) (err error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return logger.Errorf("failed to get home directory: %v", err)
@@ -524,6 +220,16 @@ func setupWireGuard(vpsName, netnsName string) error {
 	if _, err := utils.CreateWgInt(linkName); err != nil {
 		return err
 	}
+
+	// From here on, any failure must not leak the interface or namespace we
+	// created. Roll back whatever exists if we don't reach the end.
+	success := false
+	defer func() {
+		if !success {
+			logger.Warn("Rolling back partial WireGuard setup for " + logger.Highlight(netnsName))
+			utils.CleanupWireGuard(linkName, netnsName)
+		}
+	}()
 
 	// 2) Set MTU before applying config (1420 is optimal for WireGuard over typical networks)
 	link, err := netlink.LinkByName(linkName)
@@ -614,6 +320,7 @@ func setupWireGuard(vpsName, netnsName string) error {
 	}
 	_ = h.RouteReplace(v6Route)
 
+	success = true
 	logger.Info("WireGuard ready in netns " + logger.Highlight(netnsName))
 	logger.Info("Interface " + logger.Highlight(linkName) + " address: " + logger.Highlight(ip))
 	return nil

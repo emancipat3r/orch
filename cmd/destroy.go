@@ -5,7 +5,6 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
-	"strings"
 
 	"github.com/emancipat3r/orch/logger"
 	"github.com/emancipat3r/orch/providers"
@@ -21,8 +20,8 @@ var destroyCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
 
-		provider := ui.ChoiceProvider()
-		if provider == "" {
+		providerName := ui.ChoiceProvider()
+		if providerName == "" {
 			logger.Info("Operation cancelled by user.")
 			return
 		}
@@ -30,243 +29,81 @@ var destroyCmd = &cobra.Command{
 			return
 		}
 
-		switch provider {
-		// ---------------- LINODE ----------------
-		case "Linode":
-			providerKey := providers.GetLinodeAPIKey(configFile, provider)
-
-			accountBalance, err := providers.GetLinodesBalance(providerKey)
-			if err != nil {
-				logger.Error("Failed to get Linode account balance: " + err.Error())
-				return
-			}
-			logger.Info("Linode account balance: " + logger.Highlight("$"+accountBalance))
-
-			instances, err := providers.SelectLinodeInstance(providerKey)
-			if err != nil {
-				logger.Error("Failed to hit endpoint: " + err.Error())
-				return
-			}
-
-			var instanceOptions []string
-			for _, inst := range instances {
-				instanceOptions = append(
-					instanceOptions,
-					inst.Creation_Time+" - "+strconv.Itoa(inst.Id)+" - "+inst.Host_Image+" - "+inst.Ipv4[0]+" - "+inst.Region,
-				)
-			}
-
-			selectedInstances := ui.MultiSelect("Select the instance(s) to destroy:", instanceOptions)
-			if len(selectedInstances) == 0 {
-				logger.Info("No instances selected. Exiting...")
-				return
-			}
-
-			logger.Info("You selected " + strconv.Itoa(len(selectedInstances)) + " instance(s) for destruction")
-			for _, inst := range selectedInstances {
-				logger.Info("  - " + logger.Highlight(inst))
-			}
-
-			if !ui.Confirm("Are you sure you want to proceed with destroying " + strconv.Itoa(len(selectedInstances)) + " instance(s)?") {
-				logger.Info("Destruction cancelled by user.")
-				return
-			}
-
-			for i, selected := range selectedInstances {
-				parts := strings.Split(selected, " ")
-				instanceID := parts[2]
-
-				// Resolve vps_name BEFORE destroying
-				vpsName, err := utils.GetVPSNameForInstance(instanceFile, instanceID)
-				if err != nil {
-					logger.Debug("No local vps_name mapping for Linode instance " + instanceID + ": " + err.Error())
-				}
-
-				logger.Info("(" + strconv.Itoa(i+1) + "/" + strconv.Itoa(len(selectedInstances)) +
-					") Destroying Linode: " + logger.Highlight(instanceID))
-
-				_, err = providers.DestroyLinode(providerKey, instanceID, instanceFile)
-				if err != nil {
-					logger.Error("Failed to destroy Linode " + instanceID + ": " + err.Error())
-					continue
-				}
-
-				logger.Info("Successfully destroyed Linode: " + logger.Highlight(instanceID))
-
-				if vpsName != "" {
-					tearDownLocalByName(vpsName)
-				}
-			}
-
-			logger.Info("Completed destruction of " + logger.Highlight(strconv.Itoa(len(selectedInstances))) + " Linode instance(s)")
-
-		// ---------------- DIGITALOCEAN ----------------
-		case "DigitalOcean":
-			providerKey := providers.GetDOAPIKey(configFile, provider)
-			accountBalance, err := providers.GetDOBalance(providerKey)
-			if err != nil {
-				logger.Error("Failed to get DigitalOcean account balance: " + err.Error())
-				return
-			}
-			logger.Info("DigitalOcean account balance: " + logger.Highlight("$"+accountBalance))
-
-			instances, err := providers.SelectDOInstance(providerKey)
-			if err != nil {
-				logger.Error("Failed to hit endpoint: " + err.Error())
-				return
-			}
-
-			var instanceOptions []string
-			for _, inst := range instances {
-				var ipv4 string
-				for _, v4 := range inst.Networks.IPv4 {
-					if v4.Type == "public" {
-						ipv4 = v4.IPAddress
-						break
-					}
-				}
-
-				imageName := inst.Image.Description
-				if imageName == "" {
-					imageName = inst.Image.Name
-				}
-				if imageName == "" {
-					imageName = inst.Image.Slug
-				}
-
-				instanceOptions = append(
-					instanceOptions,
-					inst.Creation_Time+" - "+strconv.Itoa(inst.Id)+" - "+imageName+" - "+ipv4+" - "+inst.Region.Slug,
-				)
-			}
-
-			selectedInstances := ui.MultiSelect("Select the instance(s) to destroy:", instanceOptions)
-			if len(selectedInstances) == 0 {
-				logger.Info("No instances selected. Exiting...")
-				return
-			}
-
-			logger.Info("You selected " + strconv.Itoa(len(selectedInstances)) + " instance(s) for destruction")
-			for _, inst := range selectedInstances {
-				logger.Info("  - " + logger.Highlight(inst))
-			}
-
-			if !ui.Confirm("Are you sure you want to proceed with destroying " + strconv.Itoa(len(selectedInstances)) + " instance(s)?") {
-				logger.Info("Destruction cancelled by user.")
-				return
-			}
-
-			for i, selected := range selectedInstances {
-				parts := strings.Split(selected, " ")
-				instanceID := parts[2]
-
-				// Resolve vps_name BEFORE destroying
-				vpsName, err := utils.GetVPSNameForInstance(instanceFile, instanceID)
-				if err != nil {
-					logger.Debug("No local vps_name mapping for DO instance " + instanceID + ": " + err.Error())
-				}
-
-				logger.Info("(" + strconv.Itoa(i+1) + "/" + strconv.Itoa(len(selectedInstances)) +
-					") Destroying droplet: " + logger.Highlight(instanceID))
-
-				_, err = providers.DestroyDroplet(providerKey, instanceID, instanceFile)
-				if err != nil {
-					logger.Error("Failed to destroy droplet " + instanceID + ": " + err.Error())
-					continue
-				}
-
-				logger.Info("Successfully destroyed droplet: " + logger.Highlight(instanceID))
-
-				if vpsName != "" {
-					tearDownLocalByName(vpsName)
-				}
-			}
-
-			logger.Info("Completed destruction of " + logger.Highlight(strconv.Itoa(len(selectedInstances))) + " DigitalOcean instance(s)")
-
-		// ---------------- VULTR ----------------
-		case "Vultr":
-			providerKey := providers.GetVultrAPIKey(configFile, provider)
-			accountBalance, err := providers.GetVultrBalance(providerKey)
-			if err != nil {
-				logger.Error("Failed to get Vultr account balance: " + err.Error())
-				return
-			}
-			logger.Info("Vultr account balance: " + logger.Highlight("$"+accountBalance))
-
-			instances, err := providers.SelectVultrInstance(providerKey)
-			if err != nil {
-				logger.Error("Failed to hit endpoint: " + err.Error())
-				return
-			}
-
-			regions, err := providers.GetVultrRegions(providerKey)
-			regionCache := make(map[string]string)
-			if err == nil {
-				for _, r := range regions {
-					regionCache[r.ID] = r.ID + " - " + r.City + ", " + r.Country
-				}
-			}
-
-			var instanceOptions []string
-			for _, inst := range instances {
-				regionDisplay := inst.Region
-				if verboseRegion, ok := regionCache[inst.Region]; ok {
-					regionDisplay = verboseRegion
-				}
-				instanceOptions = append(
-					instanceOptions,
-					inst.DateCreated+" - "+inst.ID+" - "+inst.OS+" - "+inst.MainIP+" - "+regionDisplay,
-				)
-			}
-
-			selectedInstances := ui.MultiSelect("Select the instance(s) to destroy:", instanceOptions)
-			if len(selectedInstances) == 0 {
-				logger.Info("No instances selected. Exiting...")
-				return
-			}
-
-			logger.Info("You selected " + strconv.Itoa(len(selectedInstances)) + " instance(s) for destruction")
-			for _, inst := range selectedInstances {
-				logger.Info("  - " + logger.Highlight(inst))
-			}
-
-			if !ui.Confirm("Are you sure you want to proceed with destroying " + strconv.Itoa(len(selectedInstances)) + " instance(s)?") {
-				logger.Info("Destruction cancelled by user.")
-				return
-			}
-
-			for i, selected := range selectedInstances {
-				parts := strings.Split(selected, " ")
-				instanceID := parts[2]
-
-				// Resolve vps_name BEFORE destroying
-				vpsName, err := utils.GetVPSNameForInstance(instanceFile, instanceID)
-				if err != nil {
-					logger.Debug("No local vps_name mapping for Vultr instance " + instanceID + ": " + err.Error())
-				}
-
-				logger.Info("(" + strconv.Itoa(i+1) + "/" + strconv.Itoa(len(selectedInstances)) +
-					") Destroying Vultr instance: " + logger.Highlight(instanceID))
-
-				err = providers.DestroyVultr(providerKey, instanceID, instanceFile)
-				if err != nil {
-					logger.Error("Failed to destroy Vultr instance " + instanceID + ": " + err.Error())
-					continue
-				}
-
-				logger.Info("Successfully destroyed Vultr instance: " + logger.Highlight(instanceID))
-
-				if vpsName != "" {
-					tearDownLocalByName(vpsName)
-				}
-			}
-
-			logger.Info("Completed destruction of " + logger.Highlight(strconv.Itoa(len(selectedInstances))) + " Vultr instance(s)")
-
-		default:
-			logger.Warn("No provider was selected. Exiting...")
+		prov, err := providers.GetProvider(providerName, configFile)
+		if err != nil {
+			logger.Error(err.Error())
+			return
 		}
+
+		balance, err := prov.Balance(ctx)
+		if err != nil {
+			logger.Error("Failed to get " + providerName + " account balance: " + err.Error())
+			return
+		}
+		logger.Info(providerName + " account balance: " + logger.Highlight("$"+balance))
+
+		instances, err := prov.List(ctx)
+		if err != nil {
+			logger.Error("Failed to list instances: " + err.Error())
+			return
+		}
+		if len(instances) == 0 {
+			logger.Info("No instances found. Exiting...")
+			return
+		}
+
+		// Map each display label back to its instance so selection never relies
+		// on positional string parsing of the rendered label.
+		options := make([]string, 0, len(instances))
+		byLabel := make(map[string]providers.Instance, len(instances))
+		for _, inst := range instances {
+			label := inst.Created + " - " + inst.ID + " - " + inst.Image + " - " + inst.IP + " - " + inst.Region
+			options = append(options, label)
+			byLabel[label] = inst
+		}
+
+		selected := ui.MultiSelect("Select the instance(s) to destroy:", options)
+		if len(selected) == 0 {
+			logger.Info("No instances selected. Exiting...")
+			return
+		}
+
+		logger.Info("You selected " + strconv.Itoa(len(selected)) + " instance(s) for destruction")
+		for _, s := range selected {
+			logger.Info("  - " + logger.Highlight(s))
+		}
+
+		if !ui.Confirm("Are you sure you want to proceed with destroying " + strconv.Itoa(len(selected)) + " instance(s)?") {
+			logger.Info("Destruction cancelled by user.")
+			return
+		}
+
+		for i, s := range selected {
+			inst := byLabel[s]
+
+			// Resolve vps_name BEFORE destroying so we can tear down the local
+			// WireGuard/netns afterwards.
+			vpsName, err := utils.GetVPSNameForInstance(instanceFile, inst.ID)
+			if err != nil {
+				logger.Debug("No local vps_name mapping for " + providerName + " instance " + inst.ID + ": " + err.Error())
+			}
+
+			logger.Info("(" + strconv.Itoa(i+1) + "/" + strconv.Itoa(len(selected)) +
+				") Destroying " + providerName + " instance: " + logger.Highlight(inst.ID))
+
+			if err := prov.Destroy(ctx, inst.ID, instanceFile); err != nil {
+				logger.Error("Failed to destroy " + providerName + " instance " + inst.ID + ": " + err.Error())
+				continue
+			}
+
+			logger.Info("Successfully destroyed " + providerName + " instance: " + logger.Highlight(inst.ID))
+
+			if vpsName != "" {
+				tearDownLocalByName(vpsName)
+			}
+		}
+
+		logger.Info("Completed destruction of " + logger.Highlight(strconv.Itoa(len(selected))) + " " + providerName + " instance(s)")
 	},
 }
 

@@ -62,9 +62,8 @@ type Provider struct {
 	Vultr        Config `toml:"vultr"`
 }
 
-var cfg Provider
-
 func ParseCreds(path string, choice string) string {
+	var cfg Provider
 	_, err := toml.DecodeFile(path, &cfg)
 	if err != nil {
 		logger.Error("Error parsing credentials file at " + path + ": " + err.Error())

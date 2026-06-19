@@ -6,9 +6,14 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// We only really care about vps_name for this path.
+// InstanceRecord is the provider-agnostic subset of a registry entry. All three
+// providers write these same toml tags, so the registry can be read uniformly
+// regardless of which provider created the instance.
 type InstanceRecord struct {
-	VPSName string `toml:"vps_name"`
+	Id          string `toml:"id"`
+	PrivKeyPath string `toml:"priv_key_path"`
+	Provider    string `toml:"provider"`
+	VPSName     string `toml:"vps_name"`
 }
 
 type InstanceDB map[string]InstanceRecord
