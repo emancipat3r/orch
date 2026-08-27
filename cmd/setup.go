@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"sort"
 
-	"github.com/BurntSushi/toml"
 	"github.com/emancipat3r/orch/logger"
 	"github.com/emancipat3r/orch/ui"
 	"github.com/emancipat3r/orch/utils"
@@ -17,99 +17,70 @@ var setupCmd = &cobra.Command{
 	Long: `Run post-provisioning setup (WireGuard, firewall, SSH hardening) on existing VPS instances.
 This is useful if the initial setup failed or if you want to reconfigure an instance.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		// Check if instances file exists
-		if _, err := os.Stat(instanceFile); os.IsNotExist(err) {
-			logger.Error("No instances file found. Please create at least one VPS instance first.")
-			return
-		}
-
-		// Load all instances
-		var allInstances map[string]interface{}
-		if _, err := toml.DecodeFile(instanceFile, &allInstances); err != nil {
+		db, err := utils.LoadInstances(instanceFile)
+		if err != nil {
 			logger.Error("Failed to load instances file: " + err.Error())
 			return
 		}
-
-		if len(allInstances) == 0 {
+		if len(db) == 0 {
 			logger.Error("No VPS instances found. Please create at least one VPS instance first.")
 			return
 		}
 
-		// Create options for selection
-		var options []string
-		var instanceMap = make(map[string]map[string]interface{})
+		// Stable ordering so the menu doesn't reshuffle between runs.
+		ids := make([]string, 0, len(db))
+		for id := range db {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
 
-		for instanceID, instanceData := range allInstances {
-			if instanceInfo, ok := instanceData.(map[string]interface{}); ok {
-				provider := "Unknown"
-				ip := "Unknown"
-				label := instanceID
-
-				if p, exists := instanceInfo["Provider"]; exists {
-					if providerStr, ok := p.(string); ok {
-						provider = providerStr
-					}
-				}
-				if ipAddr, exists := instanceInfo["Ipv4"]; exists {
-					if ipStr, ok := ipAddr.(string); ok {
-						ip = ipStr
-					}
-				}
-				if labelStr, exists := instanceInfo["Label"]; exists {
-					if l, ok := labelStr.(string); ok {
-						label = l
-					}
-				}
-
-				displayText := fmt.Sprintf("%s - %s (%s) - %s", instanceID, label, provider, ip)
-				options = append(options, displayText)
-				instanceMap[displayText] = instanceInfo
+		options := make([]string, 0, len(db))
+		byOption := make(map[string]utils.InstanceRecord, len(db))
+		for _, id := range ids {
+			rec := db[id]
+			provider, ip, label := rec.Provider, rec.Ipv4, rec.Label
+			if provider == "" {
+				provider = "Unknown"
 			}
+			if ip == "" {
+				ip = "Unknown"
+			}
+			if label == "" {
+				label = id
+			}
+			displayText := fmt.Sprintf("%s - %s (%s) - %s", id, label, provider, ip)
+			options = append(options, displayText)
+			byOption[displayText] = rec
 		}
 
-		// Let user select instance
 		selectedInstance := ui.ChoiceGeneric("Select VPS instance to setup:", options)
 		if selectedInstance == "" {
 			logger.Info("Operation cancelled by user.")
 			return
 		}
+		rec := byOption[selectedInstance]
 
-		// Get instance details
-		instanceInfo := instanceMap[selectedInstance]
-
-		// Extract required information
-		var ip, privKeyPath, label string
-		var ok bool
-
-		if ipAddr, exists := instanceInfo["Ipv4"]; exists {
-			if ip, ok = ipAddr.(string); !ok || ip == "" || ip == "pending" {
-				logger.Error("Instance IP address is not available or pending.")
-				return
-			}
-		} else {
-			logger.Error("Instance IP address not found.")
+		ip := rec.Ipv4
+		if ip == "" || ip == "pending" {
+			logger.Error("Instance IP address is not available or pending.")
 			return
 		}
-
-		if keyPath, exists := instanceInfo["PrivKeyPath"]; exists {
-			if privKeyPath, ok = keyPath.(string); !ok || privKeyPath == "" {
-				logger.Error("Private key path not found.")
-				return
-			}
-		} else {
+		privKeyPath := rec.PrivKeyPath
+		if privKeyPath == "" {
 			logger.Error("Private key path not found.")
 			return
 		}
-
-		if labelStr, exists := instanceInfo["Label"]; exists {
-			if label, ok = labelStr.(string); !ok {
-				label = "instance"
-			}
-		} else {
+		label := rec.Label
+		if label == "" {
 			label = "instance"
 		}
 
-		// Use the label as default if vpsName is not provided via flag
+		// Prefer the name the instance was created with so setup writes the
+		// client config to the same file create/destroy use; fall back to the
+		// provider label only for pre-name registry entries.
+		if vpsName == "" {
+			vpsName = rec.VPSName
+		}
 		if vpsName == "" {
 			vpsName = label
 		}

@@ -7,12 +7,9 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
-	"github.com/BurntSushi/toml"
 	"github.com/emancipat3r/orch/logger"
 	"github.com/emancipat3r/orch/ui"
 	"github.com/emancipat3r/orch/utils"
@@ -338,8 +335,6 @@ type VultrInstanceRecord struct {
 	VPSName         string `toml:"vps_name"`
 }
 
-type VultrInstancesToml map[string]VultrInstanceRecord
-
 func CreateVultrInstance(parent context.Context, providerKey, sshKeyID, privKeyPath string, osID int, region, plan, instanceFile, vpsName string) (string, error) {
 	if providerKey == "" {
 		return "", logger.Errorf("Provider key is empty")
@@ -481,21 +476,8 @@ func CreateVultrInstance(parent context.Context, providerKey, sshKeyID, privKeyP
 		VPSName:         vpsName,
 	}
 
-	var all VultrInstancesToml
-	if _, err := os.Stat(instanceFile); err == nil {
-		if _, err := toml.DecodeFile(instanceFile, &all); err != nil {
-			logger.Warn("Could not decode existing instances file, starting fresh: " + err.Error())
-			all = make(VultrInstancesToml)
-		}
-	} else {
-		all = make(VultrInstancesToml)
-	}
-
-	all[parsed.Instance.ID] = vps
-	f, _ := os.Create(instanceFile)
-	defer f.Close()
-	if err := toml.NewEncoder(f).Encode(all); err != nil {
-		return "", err
+	if err := utils.UpsertInstanceRecord(instanceFile, parsed.Instance.ID, vps); err != nil {
+		return "", logger.Errorf("update instance file: %v", err)
 	}
 	logger.Info("Updated VPS instance file with IP: " + logger.Highlight(instanceFile))
 
@@ -574,7 +556,13 @@ func ListVultrInstances(providerKey string) ([]VultrInstance, error) {
 	return parsed.Instances, nil
 }
 
-func DestroyVultrInstance(providerKey string, instanceID string) error {
+func SelectVultrInstance(providerKey string) ([]VultrInstance, error) {
+	return ListVultrInstances(providerKey)
+}
+
+// DestroyVultr deletes the instance and its uploaded SSH key. A 404 on the
+// instance is treated as already destroyed so local cleanup can still proceed.
+func DestroyVultr(providerKey, instanceID, sshKeyID string) error {
 	if providerKey == "" {
 		return logger.Errorf("Provider key is empty")
 	}
@@ -591,119 +579,22 @@ func DestroyVultrInstance(providerKey string, instanceID string) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusNoContent {
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusNoContent:
+		logger.Info("Deleted Vultr instance: " + logger.Highlight(instanceID))
+	case http.StatusNotFound:
+		logger.Warn("Vultr instance " + instanceID + " no longer exists remotely; cleaning up locally")
+	default:
 		rb, _ := io.ReadAll(resp.Body)
 		return logger.Errorf("Unexpected status code: %d | %s", resp.StatusCode, string(rb))
 	}
 
-	return nil
-}
-
-func SelectVultrInstance(providerKey string) ([]VultrInstance, error) {
-	return ListVultrInstances(providerKey)
-}
-
-func DestroyVultr(providerKey string, instanceID string, instanceFile string) error {
-	if providerKey == "" {
-		return logger.Errorf("Provider key is empty")
-	}
-
-	// Load Vultr instances to get SSH key ID before deleting
-	var instances VultrInstancesToml
-	if _, err := os.Stat(instanceFile); err == nil {
-		if _, err := toml.DecodeFile(instanceFile, &instances); err != nil {
-			return logger.Errorf("Failed to load instances file: %v", err)
-		}
-	} else {
-		return logger.Errorf("No instances file found")
-	}
-
-	// Get SSH key ID and private key path for cleanup
-	var sshKeyID string
-	var privKeyPath string
-	instance, exists := instances[instanceID]
-	if exists {
-		sshKeyID = instance.SSHKeyID
-		privKeyPath = instance.PrivKeyPath
-	}
-
-	// Delete the instance
-	err := DestroyVultrInstance(providerKey, instanceID)
-	if err != nil {
-		return logger.Errorf("Failed to destroy Vultr instance: %v", err)
-	}
-
-	// Clean up SSH key if we have the ID
 	if sshKeyID != "" {
 		if err := DeleteVultrSSHKey(providerKey, sshKeyID); err != nil {
-			logger.Warn("Failed to delete SSH key: " + err.Error())
+			logger.Warn("Failed to delete SSH key from Vultr: " + err.Error())
 		} else {
-			logger.Info("Cleaned up SSH key: " + logger.Highlight(sshKeyID))
+			logger.Info("Deleted SSH key: " + logger.Highlight(sshKeyID))
 		}
 	}
-
-	// Delete the private key file if it exists
-	if privKeyPath != "" {
-		// Remove key from ssh-agent first
-		if err := utils.RemoveKeyFromSSHAgent(privKeyPath); err != nil {
-			logger.Debug("Could not remove key from ssh-agent: " + err.Error())
-		}
-
-		if err := os.Remove(privKeyPath); err != nil {
-			logger.Warn("Failed to delete private key file: " + err.Error())
-		} else {
-			logger.Info("Deleted private key file: " + logger.Highlight(privKeyPath))
-		}
-
-		// Delete the pub key file if it exists
-		pubKeyFile := privKeyPath + ".pub"
-		if err := os.Remove(pubKeyFile); err != nil {
-			// Don't warn about this as it might not exist
-		} else {
-			logger.Info("Deleted public key file: " + logger.Highlight(pubKeyFile))
-		}
-
-		// Also try to delete the passphrase file
-		passPhraseFile := strings.Replace(privKeyPath, "/.ssh/", "/secrets/", 1)
-		passPhraseFile = strings.TrimSuffix(passPhraseFile, filepath.Ext(passPhraseFile)) + ".pass"
-		if err := os.Remove(passPhraseFile); err != nil {
-			// Don't warn about this as it might not exist
-		} else {
-			logger.Info("Deleted passphrase file: " + logger.Highlight(passPhraseFile))
-		}
-	}
-
-	// Delete the WireGuard client config if it exists
-	if exists {
-		if p, err := utils.OrchPaths(); err == nil {
-			wgConfigPath := p.WgConf(instance.VPSName, instance.Ipv4)
-			if wgConfigPath != "" {
-				if err := os.Remove(wgConfigPath); err != nil {
-					// Check if file exists before warning
-					if !os.IsNotExist(err) {
-						logger.Warn("Failed to delete WireGuard config: " + err.Error())
-					}
-				} else {
-					logger.Info("Deleted WireGuard config: " + logger.Highlight(wgConfigPath))
-				}
-			}
-		}
-	}
-
-	// Remove from local instances file
-	if len(instances) > 0 {
-		delete(instances, instanceID)
-		f, err := os.Create(instanceFile)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		if err := toml.NewEncoder(f).Encode(instances); err != nil {
-			return err
-		}
-		logger.Info("Updated VPS instance file: " + logger.Highlight(instanceFile))
-	}
-
-	logger.Info("Successfully destroyed Vultr instance: " + logger.Highlight(instanceID))
 	return nil
 }

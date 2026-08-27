@@ -82,37 +82,6 @@ func FindOrphans(instanceFile, sshDir, secretsDir, wgDir string) (Orphans, error
 	return o, nil
 }
 
-// RemoveInstanceRecords deletes the given instance IDs from the registry while
-// preserving every other entry and field, writing back atomically.
-func RemoveInstanceRecords(instanceFile string, ids []string) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	var all map[string]map[string]interface{}
-	if _, err := toml.DecodeFile(instanceFile, &all); err != nil {
-		return fmt.Errorf("decode %s: %w", instanceFile, err)
-	}
-	for _, id := range ids {
-		delete(all, id)
-	}
-
-	tmp := instanceFile + ".tmp"
-	f, err := os.Create(tmp)
-	if err != nil {
-		return err
-	}
-	if err := toml.NewEncoder(f).Encode(all); err != nil {
-		_ = f.Close()
-		_ = os.Remove(tmp)
-		return err
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return os.Rename(tmp, instanceFile)
-}
-
 // listFiles returns the names of regular files directly under dir. A missing
 // directory yields no files rather than an error.
 func listFiles(dir string) []string {

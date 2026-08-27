@@ -9,12 +9,10 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/BurntSushi/toml"
 	"github.com/emancipat3r/orch/logger"
 	"github.com/emancipat3r/orch/ui"
 	"github.com/emancipat3r/orch/utils"
@@ -333,13 +331,11 @@ type DOInstance struct {
 	Label         string `toml:"label"`
 	Region        string `toml:"region"`
 	Type          string `toml:"type"`
-	KeyID         string `toml:"key_id"`
+	KeyID         string `toml:"ssh_key_id"`
 	PrivKeyPath   string `toml:"priv_key_path"`
 	Provider      string `toml:"provider"`
 	VPSName       string `toml:"vps_name"`
 }
-
-type DOInstancesToml map[string]DOInstance
 
 func CreateDroplet(parent context.Context, providerKey string, sshKeyID int, privKeyPath, image, region, sizeSlug, instanceFile, vpsName string) (string, error) {
 	if providerKey == "" {
@@ -497,20 +493,8 @@ func CreateDroplet(parent context.Context, providerKey string, sshKeyID int, pri
 		VPSName:       vpsName,
 	}
 
-	var all DOInstancesToml
-	if _, err := os.Stat(instanceFile); err == nil {
-		if _, err := toml.DecodeFile(instanceFile, &all); err != nil {
-			return "", err
-		}
-	} else {
-		all = make(DOInstancesToml)
-	}
-
-	all[vps.Id] = vps
-	f, _ := os.Create(instanceFile)
-	defer f.Close()
-	if err := toml.NewEncoder(f).Encode(all); err != nil {
-		return "", err
+	if err := utils.UpsertInstanceRecord(instanceFile, vps.Id, vps); err != nil {
+		return "", logger.Errorf("update instance file: %v", err)
 	}
 	logger.Info("Updated VPS instance file with IP: " + logger.Highlight(instanceFile))
 
@@ -603,137 +587,36 @@ func SelectDOInstance(providerKey string) ([]DOInstances, error) {
 
 }
 
-func DestroyDroplet(providerKey, instanceID, instanceFile string) (string, error) {
+// DestroyDroplet deletes the droplet and its uploaded SSH key. A 404 on the
+// droplet is treated as already destroyed so local cleanup can still proceed.
+func DestroyDroplet(providerKey, instanceID, sshKeyID string) error {
 	if providerKey == "" {
-		return "", logger.Errorf("Provider key is empty")
+		return logger.Errorf("Provider key is empty")
 	}
 
-	// First, load the instance data to get the SSH key ID before deleting
-	var instances DOInstancesToml
-	if _, err := os.Stat(instanceFile); err == nil {
-		if _, err := toml.DecodeFile(instanceFile, &instances); err != nil {
-			return "", logger.Errorf("Failed to load instances file: %v", err)
-		}
-	} else {
-		return "", logger.Errorf("Instance file not found: %s", instanceFile)
-	}
-
-	instance, exists := instances[instanceID]
-
-	// Delete the droplet first
 	req, err := http.NewRequest("DELETE", "https://api.digitalocean.com/v2/droplets/"+instanceID, nil)
 	if err != nil {
-		return "", err
+		return err
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+providerKey)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer resp.Body.Close()
 
-	logger.Info("Deleted droplet: " + logger.Highlight(instanceID))
-
-	// Delete the SSH key from DigitalOcean
-	if instance.KeyID != "" && instance.KeyID != "0" {
-		keyID, err := strconv.Atoi(instance.KeyID)
-		if err != nil {
-			logger.Warn("Invalid SSH key ID format: " + instance.KeyID)
-		} else {
-			err = DeleteDOSSHKey(providerKey, keyID)
-			if err != nil {
-				logger.Warn("Failed to delete SSH key from DigitalOcean: " + err.Error())
-				// Don't return error here as droplet is already deleted
-			} else {
-				logger.Info("Deleted SSH key: " + logger.Highlight(instance.KeyID))
-			}
-		}
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusNoContent:
+		logger.Info("Deleted droplet: " + logger.Highlight(instanceID))
+	case http.StatusNotFound:
+		logger.Warn("Droplet " + instanceID + " no longer exists remotely; cleaning up locally")
+	default:
+		rb, _ := io.ReadAll(resp.Body)
+		return logger.Errorf("Unexpected status code: %d | %s", resp.StatusCode, string(rb))
 	}
 
-	// Delete the private key file if it exists
-	if instance.PrivKeyPath != "" {
-		// Remove key from ssh-agent first
-		if err := utils.RemoveKeyFromSSHAgent(instance.PrivKeyPath); err != nil {
-			logger.Debug("Could not remove key from ssh-agent: " + err.Error())
-		}
-
-		if err := os.Remove(instance.PrivKeyPath); err != nil {
-			logger.Warn("Failed to delete private key file: " + err.Error())
-		} else {
-			logger.Info("Deleted private key file: " + logger.Highlight(instance.PrivKeyPath))
-		}
-
-		// Delete the pub key file if it exists
-		pubKeyFile := instance.PrivKeyPath + ".pub"
-		if err := os.Remove(pubKeyFile); err != nil {
-			// Don't warn about this as it might not exist
-		} else {
-			logger.Info("Deleted public key file: " + logger.Highlight(pubKeyFile))
-		}
-
-		// Also try to delete the passphrase file
-		passPhraseFile := strings.Replace(instance.PrivKeyPath, "/.ssh/", "/secrets/", 1)
-		passPhraseFile = strings.TrimSuffix(passPhraseFile, filepath.Ext(passPhraseFile)) + ".pass"
-		if err := os.Remove(passPhraseFile); err != nil {
-			// Don't warn about this as it might not exist
-		} else {
-			logger.Info("Deleted passphrase file: " + logger.Highlight(passPhraseFile))
-		}
-	}
-
-	// Delete the WireGuard client config if it exists
-	if p, err := utils.OrchPaths(); err == nil {
-		wgConfigPath := p.WgConf(instance.VPSName, instance.Ipv4)
-		if wgConfigPath != "" {
-			if err := os.Remove(wgConfigPath); err != nil {
-				// Check if file exists before warning
-				if !os.IsNotExist(err) {
-					logger.Warn("Failed to delete WireGuard config: " + err.Error())
-				}
-			} else {
-				logger.Info("Deleted WireGuard config: " + logger.Highlight(wgConfigPath))
-			}
-		}
-	}
-
-	// Remove the instance from the TOML file
-	// _, exists := instances[instanceID]
-	if exists {
-		delete(instances, instanceID)
-
-		// Write the updated instances file atomically
-		tmp := instanceFile + ".tmp"
-		f, err := os.Create(tmp)
-		if err != nil {
-			return "", logger.Errorf("Failed creating tmp instance file: %v", err)
-		}
-
-		if err := toml.NewEncoder(f).Encode(instances); err != nil {
-			_ = f.Close()
-			_ = os.Remove(tmp)
-			return "", logger.Errorf("Failed updating instance file: %v", err)
-		}
-
-		if err := f.Close(); err != nil {
-			_ = os.Remove(tmp)
-			return "", logger.Errorf("Failed to close tmp instance file: %v", err)
-		}
-
-		if err := os.Rename(tmp, instanceFile); err != nil {
-			_ = os.Remove(tmp)
-			return "", logger.Errorf("Failed to rename tmp instance file: %v", err)
-		}
-
-		logger.Info("Updated instance file: " + logger.Highlight(instanceFile))
-
-		return "", nil
-	} else {
-		logger.Warn("Instance not found in Instances file. Proceeding with destruction anyways...")
-	}
-
-	return "", nil
-
+	deleteRemoteSSHKey("DigitalOcean", sshKeyID, func(id int) error { return DeleteDOSSHKey(providerKey, id) })
+	return nil
 }

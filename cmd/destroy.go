@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"os"
-	"path/filepath"
 	"strconv"
 
 	"github.com/emancipat3r/orch/logger"
@@ -10,7 +8,6 @@ import (
 	"github.com/emancipat3r/orch/ui"
 	"github.com/emancipat3r/orch/utils"
 	"github.com/spf13/cobra"
-	"github.com/vishvananda/netns"
 )
 
 var destroyCmd = &cobra.Command{
@@ -77,49 +74,46 @@ var destroyCmd = &cobra.Command{
 			return
 		}
 
+		// Registry lookups are best-effort: an instance that exists remotely
+		// but not locally is still destroyed, we just have nothing local to
+		// clean up for it.
+		db, err := utils.LoadInstances(instanceFile)
+		if err != nil {
+			logger.Warn("Could not read instance registry; local artifacts won't be cleaned up: " + err.Error())
+			db = utils.InstanceDB{}
+		}
+
+		succeeded := 0
 		for i, s := range selected {
 			inst := byLabel[s]
-
-			// Resolve vps_name BEFORE destroying so we can tear down the local
-			// WireGuard/netns afterwards.
-			vpsName, err := utils.GetVPSNameForInstance(instanceFile, inst.ID)
-			if err != nil {
-				logger.Debug("No local vps_name mapping for " + providerName + " instance " + inst.ID + ": " + err.Error())
+			rec, tracked := db[inst.ID]
+			if !tracked {
+				logger.Warn("Instance " + inst.ID + " is not in the local registry; only the remote VPS will be removed")
 			}
 
 			logger.Info("(" + strconv.Itoa(i+1) + "/" + strconv.Itoa(len(selected)) +
 				") Destroying " + providerName + " instance: " + logger.Highlight(inst.ID))
 
-			if err := prov.Destroy(ctx, inst.ID, instanceFile); err != nil {
+			if err := prov.Destroy(ctx, inst.ID, rec.SSHKeyID); err != nil {
 				logger.Error("Failed to destroy " + providerName + " instance " + inst.ID + ": " + err.Error())
+				logger.Info("Local artifacts for " + inst.ID + " were left in place; re-run destroy once the provider call succeeds")
 				continue
 			}
+			succeeded++
 
-			logger.Info("Successfully destroyed " + providerName + " instance: " + logger.Highlight(inst.ID))
-
-			if vpsName != "" {
-				tearDownLocalByName(vpsName)
+			if !tracked {
+				continue
+			}
+			if errs := utils.CleanupLocalArtifacts(paths, rec); len(errs) > 0 {
+				logger.Warn(strconv.Itoa(len(errs)) + " local artifact(s) could not be removed; run `orch prune` to retry")
+			}
+			if err := utils.RemoveInstanceRecords(instanceFile, []string{inst.ID}); err != nil {
+				logger.Error("Failed to remove " + inst.ID + " from registry: " + err.Error())
 			}
 		}
 
-		logger.Info("Completed destruction of " + logger.Highlight(strconv.Itoa(len(selected))) + " " + providerName + " instance(s)")
+		logger.Info("Destroyed " + logger.Highlight(strconv.Itoa(succeeded)) + "/" + strconv.Itoa(len(selected)) + " " + providerName + " instance(s)")
 	},
-}
-
-func tearDownLocalByName(nsName string) {
-	logger.Info("Tearing down local WireGuard/netns for " + logger.Highlight(nsName))
-
-	if err := utils.TearDownNamespace(nsName, netns.None()); err != nil {
-		logger.Error("Failed to tear down netns " + nsName + ": " + err.Error())
-	}
-
-	nsDir := filepath.Join("/etc/netns", nsName)
-	_ = os.Remove(filepath.Join(nsDir, "resolv.conf"))
-	_ = os.Remove(nsDir)
-
-	_ = os.Remove(paths.WgConf(nsName, ""))
-
-	logger.Info("Local WireGuard/netns cleaned up for " + logger.Highlight(nsName))
 }
 
 func init() {

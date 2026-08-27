@@ -8,12 +8,10 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/BurntSushi/toml"
 	"github.com/emancipat3r/orch/logger"
 	"github.com/emancipat3r/orch/ui"
 	"github.com/emancipat3r/orch/utils"
@@ -225,8 +223,6 @@ type LinodeInstance struct {
 	Provider      string `toml:"provider"`
 	VPSName       string `toml:"vps_name"`
 }
-
-type LinodeInstancesToml = map[string]LinodeInstance
 
 // LinodeSSHKeyRequest for uploading SSH keys
 type LinodeSSHKeyRequest struct {
@@ -481,28 +477,8 @@ func CreateLinode(parent context.Context, providerKey string, sshKeyID int, priv
 		VPSName:       vpsName,
 	}
 
-	var allinstances LinodeInstancesToml
-
-	if _, err := os.Stat(instanceFile); err == nil {
-		if _, err := toml.DecodeFile(instanceFile, &allinstances); err != nil {
-			logger.Error("Unable to load pre-existing instance file: " + logger.Highlight(instanceFile) + string(err.Error()))
-			return "", err
-		}
-	} else {
-		allinstances = make(LinodeInstancesToml)
-	}
-
-	allinstances[VPS.Id] = VPS
-
-	f, err := os.Create(instanceFile)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-
-	err = toml.NewEncoder(f).Encode(allinstances)
-	if err != nil {
-		return "", err
+	if err := utils.UpsertInstanceRecord(instanceFile, VPS.Id, VPS); err != nil {
+		return "", logger.Errorf("update instance file: %v", err)
 	}
 
 	logger.Info("Updated VPS instance file with IP: " + logger.Highlight(instanceFile))
@@ -567,131 +543,36 @@ func SelectLinodeInstance(providerKey string) ([]LinodeInstances, error) {
 
 }
 
-func DestroyLinode(providerKey, instanceID, instanceFile string) (string, error) {
+// DestroyLinode deletes the Linode and its uploaded SSH key. A 404 on the
+// instance is treated as already destroyed so local cleanup can still proceed.
+func DestroyLinode(providerKey, instanceID, sshKeyID string) error {
 	if providerKey == "" {
-		return "", logger.Errorf("Provider key is empty")
-	}
-
-	// First, load the instance data before deleting
-	var instances LinodeInstancesToml
-	if _, err := os.Stat(instanceFile); err == nil {
-		if _, err := toml.DecodeFile(instanceFile, &instances); err != nil {
-			return "", logger.Errorf("Failed to load instances file: %v", err)
-		}
-	} else {
-		return "", logger.Errorf("Instance file not found: %s", instanceFile)
-	}
-
-	// Check if instance exists in local file
-	instance, exists := instances[instanceID]
-	if !exists {
-		return "", logger.Errorf("Instance %s not found in instances file", instanceID)
+		return logger.Errorf("Provider key is empty")
 	}
 
 	req, err := http.NewRequest("DELETE", "https://api.linode.com/v4/linode/instances/"+instanceID, nil)
 	if err != nil {
-		return "", err
+		return err
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+providerKey)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer resp.Body.Close()
 
-	logger.Info("Deleted Linode instance: " + logger.Highlight(instanceID))
-
-	// Delete the SSH key from Linode
-	if instance.SSHKeyID != "" && instance.SSHKeyID != "0" {
-		keyID, err := strconv.Atoi(instance.SSHKeyID)
-		if err != nil {
-			logger.Warn("Invalid SSH key ID format: " + instance.SSHKeyID)
-		} else {
-			err = DeleteLinodeSSHKey(providerKey, keyID)
-			if err != nil {
-				logger.Warn("Failed to delete SSH key from Linode: " + err.Error())
-				// Don't return error here as instance is already deleted
-			} else {
-				logger.Info("Deleted SSH key: " + logger.Highlight(instance.SSHKeyID))
-			}
-		}
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusNoContent:
+		logger.Info("Deleted Linode instance: " + logger.Highlight(instanceID))
+	case http.StatusNotFound:
+		logger.Warn("Linode instance " + instanceID + " no longer exists remotely; cleaning up locally")
+	default:
+		rb, _ := io.ReadAll(resp.Body)
+		return logger.Errorf("Unexpected status code: %d | %s", resp.StatusCode, string(rb))
 	}
 
-	// Delete the private key file if it exists
-	if instance.PrivKeyPath != "" {
-		// Remove key from ssh-agent first
-		if err := utils.RemoveKeyFromSSHAgent(instance.PrivKeyPath); err != nil {
-			logger.Debug("Could not remove key from ssh-agent: " + err.Error())
-		}
-
-		if err := os.Remove(instance.PrivKeyPath); err != nil {
-			logger.Warn("Failed to delete private key file: " + err.Error())
-		} else {
-			logger.Info("Deleted private key file: " + logger.Highlight(instance.PrivKeyPath))
-		}
-
-		// Delete the pub key file if it exists
-		pubKeyFile := instance.PrivKeyPath + ".pub"
-		if err := os.Remove(pubKeyFile); err != nil {
-			// Don't warn about this as it might not exist
-		} else {
-			logger.Info("Deleted public key file: " + logger.Highlight(pubKeyFile))
-		}
-
-		// Also try to delete the passphrase file
-		passPhraseFile := strings.Replace(instance.PrivKeyPath, "/.ssh/", "/secrets/", 1)
-		passPhraseFile = strings.TrimSuffix(passPhraseFile, filepath.Ext(passPhraseFile)) + ".pass"
-		if err := os.Remove(passPhraseFile); err != nil {
-			// Don't warn about this as it might not exist
-		} else {
-			logger.Info("Deleted passphrase file: " + logger.Highlight(passPhraseFile))
-		}
-	}
-
-	// Delete the WireGuard client config if it exists
-	if p, err := utils.OrchPaths(); err == nil {
-		wgConfigPath := p.WgConf(instance.VPSName, instance.Ipv4)
-		if wgConfigPath != "" {
-			if err := os.Remove(wgConfigPath); err != nil {
-				// Check if file exists before warning
-				if !os.IsNotExist(err) {
-					logger.Warn("Failed to delete WireGuard config: " + err.Error())
-				}
-			} else {
-				logger.Info("Deleted WireGuard config: " + logger.Highlight(wgConfigPath))
-			}
-		}
-	}
-
-	// Remove the instance from the TOML file
-	delete(instances, instanceID)
-
-	// Write the updated instances file atomically
-	tmp := instanceFile + ".tmp"
-	f, err := os.Create(tmp)
-	if err != nil {
-		return "", logger.Errorf("Failed creating tmp instance file: %v", err)
-	}
-
-	if err := toml.NewEncoder(f).Encode(instances); err != nil {
-		_ = f.Close()
-		_ = os.Remove(tmp)
-		return "", logger.Errorf("Failed updating instance file: %v", err)
-	}
-
-	if err := f.Close(); err != nil {
-		_ = os.Remove(tmp)
-		return "", logger.Errorf("Failed to close tmp instance file: %v", err)
-	}
-
-	if err := os.Rename(tmp, instanceFile); err != nil {
-		_ = os.Remove(tmp)
-		return "", logger.Errorf("Failed to rename tmp instance file: %v", err)
-	}
-
-	return "", nil
-
+	deleteRemoteSSHKey("Linode", sshKeyID, func(id int) error { return DeleteLinodeSSHKey(providerKey, id) })
+	return nil
 }

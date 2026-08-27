@@ -157,10 +157,16 @@ var createCmd = &cobra.Command{
 			// tunnel. Offer to tear it down so a failed setup doesn't silently
 			// cost money.
 			if inst.ID != "" && ui.Confirm("WireGuard setup failed. Destroy the just-created "+providerName+" instance "+inst.ID+" to avoid charges?") {
-				if derr := prov.Destroy(ctx, inst.ID, instanceFile); derr != nil {
+				if derr := prov.Destroy(ctx, inst.ID, sshKeyID); derr != nil {
 					logger.Error("Teardown failed: " + derr.Error())
 				} else {
 					logger.Info("Destroyed instance " + logger.Highlight(inst.ID))
+					utils.CleanupLocalArtifacts(paths, utils.InstanceRecord{
+						Id: inst.ID, PrivKeyPath: perPriv, VPSName: vpsName, SSHKeyID: sshKeyID,
+					})
+					if rerr := utils.RemoveInstanceRecords(instanceFile, []string{inst.ID}); rerr != nil {
+						logger.Warn("Failed to remove " + inst.ID + " from registry: " + rerr.Error())
+					}
 				}
 			}
 			return

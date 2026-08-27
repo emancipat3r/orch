@@ -50,7 +50,11 @@ type Provider interface {
 	UploadSSHKey(ctx context.Context, pubKeyPath string) (string, error)
 	Create(ctx context.Context, spec CreateSpec) (Instance, error)
 	List(ctx context.Context) ([]Instance, error)
-	Destroy(ctx context.Context, instanceID, instanceFile string) error
+	// Destroy removes the remote instance and, if sshKeyID is non-empty, the
+	// SSH key uploaded for it. It touches nothing on the local machine — the
+	// cmd layer owns local cleanup so it happens uniformly for all providers.
+	// An instance that is already gone remotely is not an error.
+	Destroy(ctx context.Context, instanceID, sshKeyID string) error
 }
 
 // GetProvider returns a Provider for the given display name (as produced by
@@ -71,6 +75,25 @@ func GetProvider(name, configFile string) (Provider, error) {
 	default:
 		return nil, logger.Errorf("unknown provider: %s", name)
 	}
+}
+
+// deleteRemoteSSHKey best-effort deletes the provider-side SSH key recorded for
+// an instance. Failures are logged, not returned: the instance is already gone
+// and a leftover key is harmless, whereas aborting would skip local cleanup.
+func deleteRemoteSSHKey(provider, sshKeyID string, del func(int) error) {
+	if sshKeyID == "" || sshKeyID == "0" {
+		return
+	}
+	id, err := strconv.Atoi(sshKeyID)
+	if err != nil {
+		logger.Warn("Invalid SSH key ID format: " + sshKeyID)
+		return
+	}
+	if err := del(id); err != nil {
+		logger.Warn("Failed to delete SSH key from " + provider + ": " + err.Error())
+		return
+	}
+	logger.Info("Deleted SSH key: " + logger.Highlight(sshKeyID))
 }
 
 // ---------------- Linode ----------------
@@ -180,9 +203,8 @@ func (p *linodeProvider) List(ctx context.Context) ([]Instance, error) {
 	return out, nil
 }
 
-func (p *linodeProvider) Destroy(ctx context.Context, instanceID, instanceFile string) error {
-	_, err := DestroyLinode(p.key, instanceID, instanceFile)
-	return err
+func (p *linodeProvider) Destroy(ctx context.Context, instanceID, sshKeyID string) error {
+	return DestroyLinode(p.key, instanceID, sshKeyID)
 }
 
 // ---------------- DigitalOcean ----------------
@@ -285,9 +307,8 @@ func (p *doProvider) List(ctx context.Context) ([]Instance, error) {
 	return out, nil
 }
 
-func (p *doProvider) Destroy(ctx context.Context, instanceID, instanceFile string) error {
-	_, err := DestroyDroplet(p.key, instanceID, instanceFile)
-	return err
+func (p *doProvider) Destroy(ctx context.Context, instanceID, sshKeyID string) error {
+	return DestroyDroplet(p.key, instanceID, sshKeyID)
 }
 
 // ---------------- Vultr ----------------
@@ -385,6 +406,6 @@ func (p *vultrProvider) List(ctx context.Context) ([]Instance, error) {
 	return out, nil
 }
 
-func (p *vultrProvider) Destroy(ctx context.Context, instanceID, instanceFile string) error {
-	return DestroyVultr(p.key, instanceID, instanceFile)
+func (p *vultrProvider) Destroy(ctx context.Context, instanceID, sshKeyID string) error {
+	return DestroyVultr(p.key, instanceID, sshKeyID)
 }
