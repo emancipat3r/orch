@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"os"
-	"os/user"
 	"path/filepath"
 	"strconv"
 
@@ -118,11 +117,7 @@ func tearDownLocalByName(nsName string) {
 	_ = os.Remove(filepath.Join(nsDir, "resolv.conf"))
 	_ = os.Remove(nsDir)
 
-	u, err := user.Current()
-	if err == nil {
-		wgConf := filepath.Join(u.HomeDir, ".config/orch/wg", nsName+".conf")
-		_ = os.Remove(wgConf)
-	}
+	_ = os.Remove(paths.WgConf(nsName, ""))
 
 	logger.Info("Local WireGuard/netns cleaned up for " + logger.Highlight(nsName))
 }

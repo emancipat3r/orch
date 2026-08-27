@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"os/user"
 	"path/filepath"
 	"syscall"
 
@@ -26,6 +25,7 @@ var (
 	configFile    string
 	pathAnsible   string
 	vpsName       string
+	paths         utils.Paths // canonical layout; the string globals above are derived from it
 )
 
 // rootCmd is the base command for the CLI
@@ -47,32 +47,27 @@ var rootCmd = &cobra.Command{
 // It runs for every command other than help/completion so first-time users can
 // invoke any subcommand without manually bootstrapping ~/.config/orch.
 func ensureEnvironment() error {
-	u, err := user.Current()
+	p, err := utils.OrchPaths()
 	if err != nil {
-		logger.Error("Failed to get current user: " + err.Error())
+		logger.Error(err.Error())
 		return err
 	}
+	paths = p
+	sep := string(filepath.Separator)
+	pathConfig = p.Config + sep
+	pathSSH = p.SSH + sep
+	pathSecrets = p.Secrets + sep
+	pathInstances = p.Instances + sep
+	pathAnsible = p.Ansible + sep
+	pathWg = p.Wg + sep
+	instanceFile = p.InstanceFile
+	configFile = p.ConfigFile
 
-	root := filepath.Join(u.HomeDir, ".config/orch")
-	pathConfig = filepath.Join(root, "config") + string(filepath.Separator)
-	pathSSH = filepath.Join(root, ".ssh") + string(filepath.Separator)
-	pathSecrets = filepath.Join(root, "secrets") + string(filepath.Separator)
-	pathInstances = filepath.Join(root, "instances") + string(filepath.Separator)
-	pathAnsible = filepath.Join(root, "ansible") + string(filepath.Separator)
-	pathWg = filepath.Join(root, "wg") + string(filepath.Separator)
-	instanceFile = filepath.Join(pathInstances, "instances.toml")
-	configFile = filepath.Join(pathConfig, "configuration.toml")
-
-	for _, dir := range []string{pathConfig, pathSSH, pathSecrets, pathInstances, pathAnsible, pathWg} {
-		if utils.DirExists(dir) {
-			continue
-		}
-		logger.Warn(fmt.Sprintf("Directory doesn't exist. Creating: %s", logger.Highlight(dir)))
-		if err := utils.MakeDirectory(dir); err != nil {
-			logger.Error("Failed to create directory: " + err.Error())
-			return err
-		}
-		logger.Info("Directory created: " + logger.Highlight(dir))
+	if err := p.Ensure(func(dir string) {
+		logger.Info("Created missing directory: " + logger.Highlight(dir))
+	}); err != nil {
+		logger.Error("Failed to create directory: " + err.Error())
+		return err
 	}
 
 	if utils.FileExists(configFile) {

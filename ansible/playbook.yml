@@ -7,23 +7,14 @@
     wireguard_interface: wg0
 
   pre_tasks:
-    - name: Gather OS facts
-      setup:
-        gather_subset:
-          - "!all"
-          - "!any"
-          - distribution
-          - distribution_version
-          - distribution_major_version
-
     - name: Check if OS is Ubuntu or Debian
       fail:
-        msg: "This playbook only supports Ubuntu and Debian distributions. Detected: {{ ansible_distribution }}"
-      when: ansible_distribution not in ['Ubuntu', 'Debian']
+        msg: "This playbook only supports Ubuntu and Debian distributions. Detected: {{ ansible_facts['distribution'] }}"
+      when: ansible_facts['distribution'] not in ['Ubuntu', 'Debian']
 
     - name: Display OS information
       debug:
-        msg: "Running on {{ ansible_distribution }} {{ ansible_distribution_version }}"
+        msg: "Running on {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
 
   tasks:
     - name: Stop all apt/dpkg related systemd services and timers
@@ -40,16 +31,21 @@
       ignore_errors: yes
 
     - name: Kill all background update processes
+      # NOTE: "pkill -f <pattern>" matches against full command lines, including
+      # this very shell (whose cmdline contains the pattern), so it would SIGKILL
+      # itself. The [u] bracket trick makes the regex not match its own literal
+      # text; every other pattern uses -x (exact process name) so we never
+      # over-match.
       shell: |
-        pkill -9 -f unattended-upgrade || true
-        pkill -9 apt-get || true
-        pkill -9 apt || true
-        pkill -9 dpkg || true
-        pkill -9 aptd || true
+        pkill -9 -f '[u]nattended-upgrade' || true
+        pkill -9 -x apt-get || true
+        pkill -9 -x apt || true
+        pkill -9 -x dpkg || true
+        pkill -9 -x aptd || true
         systemctl stop packagekit || true
-        pkill -9 packagekit || true
+        pkill -9 -x packagekitd || true
         systemctl stop snapd || true
-        pkill -9 snapd || true
+        pkill -9 -x snapd || true
         sleep 3
       args:
         executable: /bin/bash
@@ -159,39 +155,53 @@
         msg: "Could not detect primary network interface"
       when: primary_interface.stdout == ""
 
-    - name: Generate WireGuard server private key
-      shell: wg genkey
-      register: wg_server_private_key
-      changed_when: false
-      no_log: true
-
-    - name: Generate WireGuard server public key
-      shell: echo "{{ wg_server_private_key.stdout }}" | wg pubkey
-      register: wg_server_public_key
-      changed_when: false
-
-    - name: Generate WireGuard client private key
-      shell: wg genkey
-      register: wg_client_private_key
-      changed_when: false
-      no_log: true
-
-    - name: Generate WireGuard client public key
-      shell: echo "{{ wg_client_private_key.stdout }}" | wg pubkey
-      register: wg_client_public_key
-      changed_when: false
-
     - name: Create WireGuard configuration directory
       file:
         path: /etc/wireguard
         state: directory
         mode: "0700"
 
+    # Keys are persisted to files and only generated when absent, so re-running
+    # this playbook (orch setup) keeps the existing tunnel identity instead of
+    # rotating keys and desynchronising the already-downloaded client config.
+    - name: Generate WireGuard keypairs (only if missing)
+      shell: |
+        set -e
+        umask 077
+        [ -f /etc/wireguard/{{ item }}.key ] || wg genkey > /etc/wireguard/{{ item }}.key
+        wg pubkey < /etc/wireguard/{{ item }}.key > /etc/wireguard/{{ item }}.pub
+      args:
+        executable: /bin/bash
+        creates: /etc/wireguard/{{ item }}.pub
+      loop:
+        - server
+        - client
+
+    - name: Read WireGuard keys
+      slurp:
+        src: "/etc/wireguard/{{ item }}"
+      loop:
+        - server.key
+        - server.pub
+        - client.key
+        - client.pub
+      register: wg_key_files
+      no_log: true
+
+    - name: Set WireGuard key facts
+      set_fact:
+        wg_server_private_key: "{{ (wg_key_files.results[0].content | b64decode).strip() }}"
+        wg_server_public_key: "{{ (wg_key_files.results[1].content | b64decode).strip() }}"
+        wg_client_private_key: "{{ (wg_key_files.results[2].content | b64decode).strip() }}"
+        wg_client_public_key: "{{ (wg_key_files.results[3].content | b64decode).strip() }}"
+      no_log: true
+
     - name: Create WireGuard server configuration
       template:
         src: ../templates/server_wg_config
         dest: /etc/wireguard/wg0.conf
         mode: "0600"
+      no_log: true
       notify: restart wireguard
 
     - name: Create client remote configuration directory
@@ -205,6 +215,7 @@
         src: ../templates/client_wg_config
         dest: /root/wireguard-client/client.conf
         mode: "0600"
+      no_log: true
 
     - name: Refresh package facts
       ansible.builtin.package_facts:
@@ -215,28 +226,25 @@
         state: disabled
       when: "'ufw' in ansible_facts.packages"
 
-    - name: Configure SSHD
-      lineinfile:
-        path: /etc/ssh/sshd_config
-        regexp: "{{ item.regexp }}"
-        line: "{{ item.line }}"
-        validate: "/usr/sbin/sshd -t -f %s"
-      loop:
-        - {
-            regexp: "^.PasswordAuthentication.*",
-            line: "PasswordAuthentication no",
-          }
-        - { regexp: "^.AllowTcpForwarding.*", line: "AllowTcpForwarding yes" }
-        - { regexp: "^.GatewayPorts.*", line: "GatewayPorts yes" }
-        - {
-            regexp: "^.PubkeyAuthentication.*",
-            line: "PubkeyAuthentication yes",
-          }
-        - {
-            regexp: "^.PermitRootLogin.*",
-            line: "PermitRootLogin prohibit-password",
-          }
+    # sshd takes the FIRST value it sees for each option, and Ubuntu/Debian's
+    # sshd_config begins with "Include /etc/ssh/sshd_config.d/*.conf". Editing
+    # the main file therefore loses to cloud-init's drop-ins; a drop-in that
+    # sorts first ("00-") reliably wins.
+    - name: Configure SSHD via drop-in
+      copy:
+        dest: /etc/ssh/sshd_config.d/00-orch.conf
+        mode: "0600"
+        content: |
+          PasswordAuthentication no
+          PubkeyAuthentication yes
+          PermitRootLogin prohibit-password
+          AllowTcpForwarding yes
+          GatewayPorts yes
       notify: restart ssh
+
+    - name: Validate sshd configuration
+      command: /usr/sbin/sshd -t
+      changed_when: false
 
     - name: Start and enable WireGuard
       systemd:
@@ -246,25 +254,7 @@
 
     - name: Display server public key
       debug:
-        msg: "WireGuard Server Public Key: {{ wg_server_public_key.stdout }}"
-
-    - name: Create Ansible facts directory
-      file:
-        path: /etc/ansible/facts.d
-        state: directory
-        mode: "0755"
-
-    - name: Save WireGuard keys to local facts
-      copy:
-        content: |
-          {
-            "server_private_key": "{{ wg_server_private_key.stdout }}",
-            "server_public_key": "{{ wg_server_public_key.stdout }}",
-            "client_private_key": "{{ wg_client_private_key.stdout }}",
-            "client_public_key": "{{ wg_client_public_key.stdout }}"
-          }
-        dest: /etc/ansible/facts.d/wireguard.fact
-        mode: "0600"
+        msg: "WireGuard Server Public Key: {{ wg_server_public_key }}"
 
   handlers:
     - name: restart wireguard

@@ -3,7 +3,6 @@ package cmd
 import (
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/keygen"
@@ -199,12 +198,7 @@ func providerPrefix(name string) string {
 }
 
 func setupWireGuard(vpsName, netnsName string) (err error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return logger.Errorf("failed to get home directory: %v", err)
-	}
-
-	confPath := filepath.Join(homeDir, ".config/orch/wg", vpsName+".conf")
+	confPath := paths.WgConf(vpsName, "")
 	if _, err := os.Stat(confPath); err != nil {
 		return logger.Errorf("WireGuard config not found at %s", confPath)
 	}

@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -17,8 +16,6 @@ import (
 	"github.com/emancipat3r/orch/logger"
 	"github.com/emancipat3r/orch/ui"
 )
-
-var pathWg string
 
 // CreateSSHWrapperForAnsible creates a wrapper script that Ansible can use for SSH with passphrase
 func CreateSSHWrapperForAnsible(privKeyPath string) (string, error) {
@@ -333,16 +330,14 @@ func SetupPostProvisioningAnsible(ctx context.Context, ip, privKeyPath, vpsName 
 		VPSName:     vpsName,
 	}
 
-	u, err := user.Current()
+	p, err := OrchPaths()
 	if err != nil {
-		logger.Error("Failed to get current user: " + err.Error())
 		return err
 	}
-	pathAnsibleDir := filepath.Join(u.HomeDir, ".config", "orch", "ansible")
-	if err := os.MkdirAll(pathAnsibleDir, 0755); err != nil {
-		return fmt.Errorf("failed to ensure ansible dir: %w", err)
+	if err := p.Ensure(nil); err != nil {
+		return err
 	}
-	pathAnsibleInventory := filepath.Join(pathAnsibleDir, "inventory")
+	pathAnsibleInventory := filepath.Join(p.Ansible, "inventory")
 	if err := GenerateInventory(config, pathAnsibleInventory); err != nil {
 		return fmt.Errorf("failed to generate inventory: %w", err)
 	}
@@ -373,23 +368,22 @@ func SetupPostProvisioningAnsible(ctx context.Context, ip, privKeyPath, vpsName 
 
 // DownloadClientConfig downloads the WireGuard client configuration from the VPS
 func DownloadClientConfig(ip, privKeyPath, vpsName string) error {
-
-	// Get current user
-	currentUser, err := user.Current()
+	p, err := OrchPaths()
 	if err != nil {
-		return fmt.Errorf("failed to get current user: %w", err)
+		return err
+	}
+	// scp won't create the destination directory; make sure it exists even if
+	// this helper is reached without the root pre-run hook having run.
+	if err := p.Ensure(nil); err != nil {
+		return err
 	}
 
-	// Create local directory for client configs
-	pathWg = currentUser.HomeDir + "/.config/orch/wg/"
-
-	// Download client.conf
 	scpCmd := exec.Command("scp",
 		"-i", privKeyPath,
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
 		fmt.Sprintf("root@%s:/root/wireguard-client/client.conf", ip),
-		filepath.Join(pathWg, fmt.Sprintf("%s.conf", vpsName)),
+		p.WgConf(vpsName, ""),
 	)
 
 	if err := scpCmd.Run(); err != nil {

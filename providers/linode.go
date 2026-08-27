@@ -652,17 +652,8 @@ func DestroyLinode(providerKey, instanceID, instanceFile string) (string, error)
 	}
 
 	// Delete the WireGuard client config if it exists
-	homeDir, err := os.UserHomeDir()
-	if err == nil {
-		var wgConfigPath string
-		if instance.VPSName != "" {
-			// Use VPSName if available (new instances)
-			wgConfigPath = filepath.Join(homeDir, ".config", "orch", "wg", instance.VPSName+".conf")
-		} else if instance.Ipv4 != "" && instance.Ipv4 != "pending" {
-			// Fallback to IP-based name for backward compatibility
-			wgConfigPath = filepath.Join(homeDir, ".config", "orch", "wg", "client-"+instance.Ipv4+".conf")
-		}
-
+	if p, err := utils.OrchPaths(); err == nil {
+		wgConfigPath := p.WgConf(instance.VPSName, instance.Ipv4)
 		if wgConfigPath != "" {
 			if err := os.Remove(wgConfigPath); err != nil {
 				// Check if file exists before warning

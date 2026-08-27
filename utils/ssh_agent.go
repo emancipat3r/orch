@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/emancipat3r/orch/logger"
@@ -84,11 +83,11 @@ func AddKeyToSSHAgent(privKeyPath string) error {
 }
 
 func readPassphraseForKey(privKeyPath string) (string, error) {
-	keyName := filepath.Base(privKeyPath)              // e.g., do-13072376
-	cfgRoot := filepath.Dir(filepath.Dir(privKeyPath)) // .../.config/orch
-	passFile := filepath.Join(cfgRoot, "secrets", keyName+".pass")
-
-	b, err := os.ReadFile(passFile)
+	p, err := OrchPaths()
+	if err != nil {
+		return "", err
+	}
+	b, err := os.ReadFile(p.PassFile(privKeyPath))
 	if err != nil {
 		return "", err
 	}
